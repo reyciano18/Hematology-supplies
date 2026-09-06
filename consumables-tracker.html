@@ -275,7 +275,6 @@
       <input type="password" id="authPassword" autocomplete="current-password">
     </div>
     <button class="primary" id="btnAuthSignIn" style="width:100%;margin-top:6px;">Sign in</button>
-    <button id="btnAuthSignUp" style="width:100%;margin-top:8px;">Create an account</button>
     <p class="auth-hint" id="authHint" style="display:none;"></p>
   </div>
 </div>
@@ -533,23 +532,6 @@ document.getElementById('btnAuthSignIn').addEventListener('click', async ()=>{
   const who = document.getElementById('loggedInAs');
   if(who) who.textContent = email;
   load();
-});
-document.getElementById('btnAuthSignUp').addEventListener('click', async ()=>{
-  const email = document.getElementById('authEmail').value.trim();
-  const password = document.getElementById('authPassword').value;
-  document.getElementById('authErr').style.display = 'none';
-  authHint('');
-  if(!email || !password){ authError('Enter an email and a password (6+ characters) to create an account.'); return; }
-  const { data, error } = await sb.auth.signUp({ email, password });
-  if(error){ authError(error.message); return; }
-  if(data.session){
-    showApp();
-    const who = document.getElementById('loggedInAs');
-    if(who) who.textContent = email;
-    load();
-  }else{
-    authHint('Account created. Check your email to confirm it, then sign in.');
-  }
 });
 (async function initAuth(){
   const { data: { session } } = await sb.auth.getSession();
