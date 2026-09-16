@@ -6,6 +6,7 @@
 <title>Hematology Supply Monitor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root{
     --bg:#15181c;
@@ -36,6 +37,14 @@
   .auth-sub{font-size:13px;color:var(--text-dim);margin:0 0 18px;}
   .auth-err{background:var(--crit-dim);color:var(--crit);border:1px solid var(--crit);border-radius:5px;padding:8px 10px;font-size:12px;margin-bottom:14px;}
   .auth-hint{font-size:12px;color:var(--text-dim);margin-top:12px;text-align:center;}
+  .scan-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid var(--line) !important;border-radius:5px;color:var(--text-dim) !important;}
+  .scanner-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;padding:20px;}
+  .scanner-overlay.open{display:flex;}
+  .scanner-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;width:100%;max-width:420px;}
+  .scanner-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-weight:600;font-size:14px;}
+  #barcode-reader{width:100%;border-radius:6px;overflow:hidden;background:#000;min-height:200px;}
+  #barcode-reader video{width:100% !important;}
+  .scanner-hint{font-size:12px;color:var(--text-dim);text-align:center;margin-top:10px;}
 
   .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px;border-bottom:1px solid var(--line);padding-bottom:16px;}
   .hdr h1{font-family:var(--disp);font-weight:600;font-size:22px;letter-spacing:0.5px;text-transform:uppercase;margin:0;}
@@ -75,6 +84,7 @@
   .area-tab .close{margin-left:4px;opacity:0.5;font-size:13px;}
   .area-tab .close:hover{opacity:1;color:var(--crit);}
   .area-tab .close.confirm{opacity:1;color:var(--crit);font-weight:600;}
+  .tab-missing-badge{margin-left:6px;color:var(--warn);font-weight:700;font-size:11px;background:var(--warn-dim);border-radius:50%;padding:0px 5px;}
   .area-heading{
     display:flex;align-items:baseline;gap:10px;margin:22px 0 10px;
     font-family:var(--disp);font-size:13px;letter-spacing:1px;text-transform:uppercase;
@@ -228,6 +238,29 @@
   .pc-variance.pos{color:var(--ok);}
   .pc-variance.neg{color:var(--crit);}
 
+  .daily-dup-warn{display:none;color:var(--warn);background:var(--warn-dim);border:1px solid var(--warn);border-radius:4px;padding:9px 12px;font-size:12px;margin-bottom:12px;}
+  .monthly-table-wrap{overflow-x:auto;border:1px solid var(--line-soft);border-radius:4px;}
+  .monthly-table{border-collapse:collapse;font-family:var(--mono);white-space:nowrap;}
+  .monthly-table th, .monthly-table td{border:1px solid var(--line-soft);padding:4px 6px;font-size:11px;text-align:right;}
+  .monthly-table th.dayhead{text-align:center;background:var(--panel2);}
+  .monthly-table td.rowname, .monthly-table th.rowname{
+    position:sticky;left:0;background:var(--panel);text-align:left;font-family:var(--sans);z-index:1;
+    min-width:160px;max-width:160px;white-space:normal;
+  }
+  .monthly-table th.rowname{background:var(--panel2);}
+  .monthly-table td.bal{color:var(--text-dim);}
+  .monthly-table td.in{color:var(--ok);}
+  .monthly-table td.out{color:var(--crit);}
+  #dailyUpdatePanel .bulk-table th, #dailyUpdatePanel .bulk-table td{padding:8px 6px;}
+  #dailyUpdatePanel .bulk-table .colnum{width:96px;}
+  #dailyUpdatePanel .bulk-table .colloc{width:130px;}
+  #dailyUpdatePanel .bulk-table .colin{width:150px;}
+  #dailyUpdatePanel .bulk-table .colin input[type=text]{margin-top:4px;font-size:11px;min-height:32px;padding:5px 6px;}
+  #dailyUpdatePanel .bulk-table input[type=number],
+  #dailyUpdatePanel .bulk-table select{
+    min-height:44px;font-size:15px;padding:9px 8px;
+  }
+
   @media print{
     :root{
       --bg:#ffffff;
@@ -257,6 +290,41 @@
     body.printing-disposal .summary-panel:not(#disposalReportPanel){display:none !important;}
     body.printing-disposal .disposal-print-head{display:block !important;margin-bottom:14px;}
     body.printing-disposal .summary-table th, body.printing-disposal .summary-table td{font-size:10px;padding:5px 6px;}
+    body.printing-balance .hdr, body.printing-balance .toolbar, body.printing-balance .area-tabs,
+    body.printing-balance #list, body.printing-balance #emptyState,
+    body.printing-balance .usage-filter-row, body.printing-balance .panel-close{
+      display:none !important;
+    }
+    body.printing-balance .summary-panel:not(#balanceReportPanel){display:none !important;}
+    body.printing-balance .balance-print-head{display:block !important;margin-bottom:14px;}
+    body.printing-balance .summary-table th, body.printing-balance .summary-table td{font-size:10px;padding:5px 6px;}
+    body.printing-summary .hdr, body.printing-summary .toolbar, body.printing-summary .area-tabs,
+    body.printing-summary #list, body.printing-summary #emptyState,
+    body.printing-summary .usage-filter-row, body.printing-summary .panel-close{
+      display:none !important;
+    }
+    body.printing-summary .summary-panel:not(#summaryPanel){display:none !important;}
+    body.printing-summary .summary-print-head{display:block !important;margin-bottom:14px;}
+    body.printing-summary .summary-table th, body.printing-summary .summary-table td{font-size:10px;padding:5px 6px;}
+    body.printing-restock .hdr, body.printing-restock .toolbar, body.printing-restock .area-tabs,
+    body.printing-restock #list, body.printing-restock #emptyState,
+    body.printing-restock .usage-filter-row, body.printing-restock .panel-close{
+      display:none !important;
+    }
+    body.printing-restock .summary-panel:not(#restockReportPanel){display:none !important;}
+    body.printing-restock .restock-print-head{display:block !important;margin-bottom:14px;}
+    body.printing-restock .usage-table th, body.printing-restock .usage-table td{font-size:10px;padding:5px 6px;}
+    body.printing-restock .restock-onscreen-only{display:none !important;}
+    body.printing-restock .restock-print-only{display:table !important;}
+    body.printing-restock .summary-table th, body.printing-restock .summary-table td{font-size:10px;padding:5px 6px;}
+    body.printing-monthly .hdr, body.printing-monthly .toolbar, body.printing-monthly .area-tabs,
+    body.printing-monthly #list, body.printing-monthly #emptyState,
+    body.printing-monthly .usage-filter-row, body.printing-monthly .panel-close{
+      display:none !important;
+    }
+    body.printing-monthly .summary-panel:not(#monthlySheetPanel){display:none !important;}
+    body.printing-monthly .monthly-print-head{display:block !important;margin-bottom:14px;}
+    body.printing-monthly .monthly-table th, body.printing-monthly .monthly-table td{font-size:7px;padding:2px 3px;}
   }
 </style>
 </head>
@@ -276,6 +344,17 @@
     </div>
     <button class="primary" id="btnAuthSignIn" style="width:100%;margin-top:6px;">Sign in</button>
     <p class="auth-hint" id="authHint" style="display:none;"></p>
+  </div>
+</div>
+<div class="scanner-overlay" id="scannerOverlay">
+  <div class="scanner-card">
+    <div class="scanner-head">
+      <span>Scan barcode</span>
+      <button class="panel-close" id="btnScannerClose" aria-label="Close">&times;</button>
+    </div>
+    <div id="barcode-reader"></div>
+    <div class="transfer-err" id="scannerErr" style="display:none;"></div>
+    <p class="scanner-hint">Point your camera at the barcode</p>
   </div>
 </div>
 <div id="app" style="display:none;">
@@ -299,15 +378,20 @@
     <button class="primary" id="btnAdd">New item</button>
     <button id="btnBulk">Restock/transfer</button>
     <button id="btnBulkUse">Usage</button>
+    <button id="btnDailyUpdate">Daily update</button>
+    <button id="btnUndoDaily" style="display:none;">Undo last</button>
     <div class="more-menu">
       <button id="btnMore" aria-haspopup="true" aria-expanded="false">More <i class="ti ti-chevron-down" aria-hidden="true"></i></button>
       <div class="more-dropdown" id="moreDropdown">
         <button id="btnEditAll">Edit items</button>
         <button id="btnSummary">Remaining balance</button>
         <button id="btnActivityReport">Usage &amp; received report</button>
+        <button id="btnDailyLogReport">Daily entry log</button>
         <button id="btnRestockReport">Restock report</button>
         <button id="btnPhysicalCount">Physical count report</button>
         <button id="btnDisposalReport">Reagent disposal report</button>
+        <button id="btnBalanceReport">Received/used/balance report</button>
+        <button id="btnMonthlySheet">Monthly reagent sheet</button>
         <div class="more-divider"></div>
         <button id="btnBackup">Backup</button>
         <button id="btnRestore">Restore</button>
@@ -335,11 +419,17 @@
 
   <div class="summary-panel" id="activityReportPanel"></div>
 
+  <div class="summary-panel" id="dailyLogReportPanel"></div>
+
   <div class="summary-panel" id="restockReportPanel"></div>
 
   <div class="summary-panel" id="physicalCountPanel"></div>
 
   <div class="summary-panel" id="disposalReportPanel"></div>
+
+  <div class="summary-panel" id="balanceReportPanel"></div>
+
+  <div class="summary-panel" id="monthlySheetPanel"></div>
 
   <div class="add-panel" id="editAllPanel">
     <div class="panel-head"><span class="panel-title" style="margin:0;">Edit items</span><button class="panel-close" id="btnCancelEditAllX" aria-label="Close">&times;</button></div>
@@ -391,7 +481,7 @@
 
   <div class="add-panel" id="bulkPanel">
     <div class="panel-head"><span class="panel-title" style="margin:0;">Restock/transfer</span><button class="panel-close" id="btnCancelBulkX" aria-label="Close">&times;</button></div>
-    <div class="bulk-hint">Fill in a row per item — every field is required. Set "From" to a location to transfer stock out of it (deducted from that location, "Received from" locks to N/A); set "From" to "External / supplier" to receive new stock instead (pick a "Received from" value). Blank rows are ignored.</div>
+    <div class="bulk-hint">Fill in a row per item — every field is required. Set "From" to a location to transfer stock out of it (deducted from that location, "Received from" locks to N/A); set "From" to "External / supplier" to receive new stock instead (pick a "Received from" value, plus a Lot/Expiry if you want that batch tracked). Blank rows are ignored. Note: transfers here move quantity only — to link a transfer to a specific tracked batch, use the item card's own Transfer button instead.</div>
     <div class="add-grid" style="grid-template-columns:2fr 1fr;align-items:end;margin-bottom:14px;">
       <div><label>Quick-add: load current stock from</label><select id="bulkLoadFrom"><option value="">Choose location...</option></select></div>
       <div><button type="button" id="btnBulkLoadFrom">+ Add rows for that stock</button></div>
@@ -404,6 +494,8 @@
           <th class="colloc">From</th>
           <th class="colloc">To</th>
           <th class="colsrc">Received from</th>
+          <th class="colsrc">Lot (optional)</th>
+          <th class="colsrc">Expiry (optional)</th>
           <th class="coldate">Date</th>
           <th class="colrm"></th>
         </tr>
@@ -420,7 +512,7 @@
 
   <div class="add-panel" id="bulkUsePanel">
     <div class="panel-head"><span class="panel-title" style="margin:0;">Usage</span><button class="panel-close" id="btnCancelBulkUseX" aria-label="Close">&times;</button></div>
-    <div class="bulk-hint">Log usage or write off several items in one location at once. Leave a row's Reason as "Used" for normal usage, or pick a write-off reason to log it as a write-off instead. Leave a quantity at 0 to skip an item.</div>
+    <div class="bulk-hint">Log usage or write off several items in one location at once. Leave a row's Reason as "Used" for normal usage, or pick a write-off reason to log it as a write-off instead. Leave a quantity at 0 to skip an item. Pick a Batch for an item if you want that specific lot's count reduced.</div>
     <div class="add-grid" style="grid-template-columns:1fr 1fr;">
       <div><label>Location</label><select id="bulkUseArea"></select></div>
       <div><label>Date</label><input type="date" id="bulkUseDate"></div>
@@ -441,6 +533,7 @@
             <th class="colnum">Available</th>
             <th class="colnum">Quantity</th>
             <th class="colsrc">Reason</th>
+            <th class="colsrc">Batch (optional)</th>
           </tr>
         </thead>
         <tbody id="bulkUseItems"></tbody>
@@ -450,6 +543,45 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="btnCancelBulkUse">Cancel</button>
       <button class="primary" id="btnConfirmBulkUse">Usage</button>
+    </div>
+  </div>
+
+  <div class="add-panel" id="dailyUpdatePanel">
+    <div class="panel-head"><span class="panel-title" style="margin:0;">Daily update</span><button class="panel-close" id="btnCancelDailyX" aria-label="Close">&times;</button></div>
+    <div class="bulk-hint">One row per reagent, like the paper consumption sheet: Balance is the current count, In is what was received today — type a source under the quantity; if it matches one of your locations exactly (e.g. "PATHO"), that quantity is actually pulled from that location's stock instead of just logged as an external receipt. Out is what was consumed, Transfer moves stock out to another location (pick the destination in "To"). Leave a field blank to skip it.</div>
+    <div class="add-grid" style="grid-template-columns:1fr 1fr;">
+      <div><label>Location</label><select id="dailyArea"></select></div>
+      <div><label>Date</label><input type="date" id="dailyDate"></div>
+    </div>
+    <div class="add-grid" style="grid-template-columns:1fr 1fr;">
+      <div><label>Note <span style="color:var(--text-faint);font-weight:400;">(applies to all rows entered below)</span></label><input type="text" id="dailyNote" placeholder="e.g. AM shift, MTOD..."></div>
+      <div><label>Default received from <span style="color:var(--text-faint);font-weight:400;">(used for any "In" row left blank below)</span></label><input type="text" id="dailySource" placeholder="e.g. Allied, FAS, transfer slip #..."></div>
+    </div>
+    <div class="daily-dup-warn" id="dailyDupWarn"></div>
+    <div class="transfer-select-links">
+      <span style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;">Quick fill</span>
+      <button type="button" id="btnCopyYesterday">Copy from yesterday</button>
+      <button type="button" id="btnFillSuppliers">Fill blank sources</button>
+    </div>
+    <div class="transfer-item-list">
+      <table class="bulk-table">
+        <thead>
+          <tr>
+            <th class="colname">Reagent / supply</th>
+            <th class="colnum">Balance</th>
+            <th class="colin">In <span style="font-weight:400;color:var(--text-faint);">(+ source)</span></th>
+            <th class="colnum">Out</th>
+            <th class="colnum">Transfer</th>
+            <th class="colloc">To</th>
+          </tr>
+        </thead>
+        <tbody id="dailyItems"></tbody>
+      </table>
+    </div>
+    <div class="bulk-err" id="dailyErr"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="btnCancelDaily">Cancel</button>
+      <button class="primary" id="btnConfirmDaily">Save daily update</button>
     </div>
   </div>
 
@@ -569,6 +701,56 @@ function showToast(msg){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> el.classList.remove('show'), 2600);
 }
+
+// --- Barcode camera scanner ---
+let scannerTargetInput = null;
+let html5QrCodeInstance = null;
+
+function openBarcodeScanner(targetInput){
+  scannerTargetInput = targetInput;
+  const errEl = document.getElementById('scannerErr');
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  document.getElementById('scannerOverlay').classList.add('open');
+
+  if(typeof Html5Qrcode === 'undefined'){
+    errEl.textContent = 'Scanner failed to load. Check your connection and try again.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  html5QrCodeInstance = new Html5Qrcode('barcode-reader');
+  html5QrCodeInstance.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 260, height: 160 } },
+    (decodedText) => {
+      if(scannerTargetInput){
+        scannerTargetInput.value = decodedText;
+        scannerTargetInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      showToast(`Scanned: ${decodedText}`);
+      closeBarcodeScanner();
+    },
+    () => { /* per-frame scan miss - expected constantly while aiming, ignore */ }
+  ).catch((err) => {
+    errEl.textContent = 'Could not access camera: ' + (err && err.message ? err.message : 'permission denied or no camera found.');
+    errEl.style.display = 'block';
+  });
+}
+
+function closeBarcodeScanner(){
+  document.getElementById('scannerOverlay').classList.remove('open');
+  scannerTargetInput = null;
+  if(html5QrCodeInstance){
+    const instance = html5QrCodeInstance;
+    html5QrCodeInstance = null;
+    instance.stop().then(() => instance.clear()).catch(() => {});
+  }
+}
+document.getElementById('btnScannerClose').addEventListener('click', closeBarcodeScanner);
+document.getElementById('scannerOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'scannerOverlay') closeBarcodeScanner();
+});
 
 document.getElementById('btnMore').addEventListener('click', (e)=>{
   e.stopPropagation();
@@ -873,12 +1055,44 @@ function fmt(n){
   return Number.isInteger(r) ? r.toString() : r.toFixed(2);
 }
 
+function batchPickerFld(item, dataEl, label, optionalNote){
+  const openBatches = (item.batches || []).filter(b => b.qtyRemaining > 0).slice().sort((a,b) => {
+    if(!a.expiry) return 1;
+    if(!b.expiry) return -1;
+    return a.expiry.localeCompare(b.expiry);
+  });
+  if(openBatches.length === 0) return '';
+  const opts = openBatches.map(b => {
+    const expDs = b.expiry ? new Date(b.expiry + 'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : 'no expiry set';
+    const optLabel = `Lot ${b.lot || '\u2014'} \u00b7 exp ${expDs} \u00b7 ${fmt(b.qtyRemaining)} left`;
+    return `<option value="${b.id}">${escapeHtml(optLabel)}</option>`;
+  }).join('');
+  return `<div class="fld">
+    <label>${escapeHtml(label)}</label>
+    <select data-el="${dataEl}">
+      <option value="">\u2014 ${escapeHtml(optionalNote || 'not tracked to a specific batch')} \u2014</option>
+      ${opts}
+    </select>
+  </div>`;
+}
+
+function hasDailyEntryToday(area){
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0,0).getTime();
+  const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59,999).getTime();
+  return items.some(i => i.area === area && (i.log||[]).some(l => {
+    const n = l.note || '';
+    return n.endsWith('(daily entry)') && l.t >= dayStart && l.t <= dayEnd;
+  }));
+}
+
 function renderAreaTabs(){
   const wrap = document.getElementById('areaTabs');
   const allBtn = `<button class="area-tab ${activeArea==='all'?'active':''}" data-area="all">All areas</button>`;
   const tabs = areas.map(a => {
     const confirming = pendingRemoveArea === a;
-    return `<button class="area-tab ${activeArea===a?'active':''}" data-area="${escapeHtml(a)}">${escapeHtml(a)}<span class="rename" data-rename="${escapeHtml(a)}" title="Rename">&#9998;</span><span class="close ${confirming?'confirm':''}" data-remove="${escapeHtml(a)}" title="${confirming?'Click again to remove':'Remove location'}">${confirming?'&#10003;':'&times;'}</span></button>`;
+    const missingBadge = hasDailyEntryToday(a) ? '' : `<span class="tab-missing-badge" title="No daily update logged today">!</span>`;
+    return `<button class="area-tab ${activeArea===a?'active':''}" data-area="${escapeHtml(a)}">${escapeHtml(a)}${missingBadge}<span class="rename" data-rename="${escapeHtml(a)}" title="Rename">&#9998;</span><span class="close ${confirming?'confirm':''}" data-remove="${escapeHtml(a)}" title="${confirming?'Click again to remove':'Remove location'}">${confirming?'&#10003;':'&times;'}</span></button>`;
   }).join('');
   wrap.innerHTML = allBtn + tabs;
 }
@@ -887,6 +1101,9 @@ function render(){
   renderAreaTabs();
   if(document.getElementById('summaryPanel').classList.contains('open')) renderSummary();
   if(document.getElementById('activityReportPanel').classList.contains('open')) renderActivityReport();
+  if(document.getElementById('dailyLogReportPanel').classList.contains('open')) renderDailyLogReport();
+  if(document.getElementById('balanceReportPanel').classList.contains('open')) renderBalanceReport();
+  if(document.getElementById('monthlySheetPanel').classList.contains('open')) renderMonthlySheet();
   if(document.getElementById('restockReportPanel').classList.contains('open')) renderRestockReport();
   const list = document.getElementById('list');
   const empty = document.getElementById('emptyState');
@@ -1085,6 +1302,7 @@ function renderCard(item){
           <label>Quantity</label>
           <input type="number" min="0" step="0.01" max="${item.qty}" value="${fmt(item.qty)}" data-el="writeoff-qty">
         </div>
+        ${batchPickerFld(item, 'writeoff-batch', 'From batch (optional)')}
         <div class="fld">
           <label>Reason</label>
           <select data-el="writeoff-reason">
@@ -1112,6 +1330,7 @@ function renderCard(item){
           <label>Quantity used</label>
           <input type="number" min="0" step="0.01" max="${item.qty}" value="${fmt(item.threshold > 0 ? Math.max(1, Math.round(item.threshold*0.1)) : 1)}" data-el="usage-qty">
         </div>
+        ${batchPickerFld(item, 'usage-batch', 'From batch (optional)')}
         <div class="fld">
           <label>Note (optional)</label>
           <input type="text" placeholder="Run #, tech, reason..." data-el="usage-note">
@@ -1130,6 +1349,14 @@ function renderCard(item){
           <input type="number" min="0" step="0.01" value="${fmt(item.threshold > 0 ? Math.max(1, Math.round(item.threshold*0.1)) : 1)}" data-el="restock-qty">
         </div>
         <div class="fld">
+          <label>Lot number (optional)</label>
+          <input type="text" placeholder="e.g. 12345" data-el="restock-lot">
+        </div>
+        <div class="fld">
+          <label>Expiry date (unopened, optional)</label>
+          <input type="date" data-el="restock-expiry">
+        </div>
+        <div class="fld">
           <label>Received from</label>
           <input type="text" placeholder="Supplier, PO#, transfer..." data-el="restock-source">
         </div>
@@ -1146,6 +1373,7 @@ function renderCard(item){
           <label>Quantity</label>
           <input type="number" min="0" step="0.01" max="${item.qty}" value="${fmt(item.qty)}" data-el="transfer-qty">
         </div>
+        ${batchPickerFld(item, 'transfer-batch', 'From batch (optional)')}
         <div class="fld">
           <label>To location</label>
           <select data-el="transfer-dest">${areas.filter(a=>a!==item.area).map(a=>`<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}</select>
@@ -1159,9 +1387,13 @@ function renderCard(item){
       </div>
       <div class="transfer-panel" data-panel="unitopen">
         <div class="transfer-err" data-el="unitopen-err"></div>
+        ${batchPickerFld(item, 'unitopen-batch', 'Batch received', 'pick manually below')}
         <div class="fld">
           <label>Barcode (optional)</label>
-          <input type="text" placeholder="Scan or type..." data-el="unitopen-barcode">
+          <div style="display:flex;gap:6px;">
+            <input type="text" placeholder="Scan or type..." data-el="unitopen-barcode" style="flex:1;">
+            <button type="button" class="ghost scan-btn" data-act="scan-barcode" title="Scan barcode with camera" aria-label="Scan barcode with camera"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></button>
+          </div>
         </div>
         <div class="fld">
           <label>Lot number (optional)</label>
@@ -1230,6 +1462,7 @@ function renderSummary(){
     <label>Item<select id="summaryItemFilter">${itemOpts}</select></label>
     <label>Supplier<select id="summarySupplierFilter">${supplierOpts}</select></label>
     <button type="button" id="btnSummaryFilterClear">Clear filters</button>
+    <button type="button" id="btnSummaryPrint">Print report</button>
   </div>`;
 
   const filteredItems = items.filter(i =>
@@ -1255,7 +1488,12 @@ function renderSummary(){
     wrap.innerHTML = head + filterRow + `<div class="empty">${msg}</div>`;
     return;
   }
-  wrap.innerHTML = head + filterRow + `<table class="summary-table">
+  wrap.innerHTML = head + filterRow + `
+    <div class="summary-print-head" style="display:none;">
+      <div style="font-weight:600;">${escapeHtml(sectionUnit || 'REMAINING BALANCE REPORT')}</div>
+      <div style="font-size:12px;color:var(--text-dim);">Location: ${escapeHtml(summaryFilterArea || 'All locations')}${summaryFilterStatus ? ` &middot; Status: ${escapeHtml(summaryFilterStatus)}` : ''} &middot; As of ${new Date().toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}</div>
+    </div>
+    <table class="summary-table">
     <thead><tr><th>Name / code</th><th>By location</th><th style="text-align:right;">Combined total</th></tr></thead>
     <tbody>
       ${rows.map(r=>{
@@ -1285,6 +1523,11 @@ document.getElementById('summaryPanel').addEventListener('click', (e)=>{
     summaryFilterItem = '';
     summaryFilterSupplier = '';
     renderSummary();
+  }
+  if(e.target.id === 'btnSummaryPrint'){
+    document.body.classList.add('printing-summary');
+    window.print();
+    setTimeout(()=> document.body.classList.remove('printing-summary'), 300);
   }
 });
 document.getElementById('summaryPanel').addEventListener('change', (e)=>{
@@ -1318,7 +1561,7 @@ function balanceAsOf(item, ts){
 }
 
 function extractSource(note){
-  let m = note.match(/received from (.+)$/i);
+  let m = note.match(/received from (.+?)(?:\s*\(daily entry\))?$/i);
   if(m) return m[1].trim();
   m = note.match(/supplier:\s*([^)]+)\)/i);
   if(m) return m[1].trim();
@@ -1591,9 +1834,125 @@ document.getElementById('activityReportPanel').addEventListener('change', (e)=>{
 });
 
 let restockFilterFrom = '';
+let dailyLogFilterFrom = '';
+let dailyLogFilterTo = '';
+let dailyLogFilterArea = '';
+
+function renderDailyLogReport(){
+  const wrap = document.getElementById('dailyLogReportPanel');
+  const head = `<div class="panel-head"><span class="panel-title">Daily entry log</span><button class="panel-close" data-act="close-dailylog" aria-label="Close">&times;</button></div>`;
+  const areaOpts = `<option value="">All locations</option>` + areas.map(a => `<option value="${escapeHtml(a)}" ${dailyLogFilterArea===a?'selected':''}>${escapeHtml(a)}</option>`).join('');
+  const filterRow = `<div class="usage-filter-row">
+    <label>From<input type="date" id="dailyLogFromDate" value="${dailyLogFilterFrom}"></label>
+    <label>To<input type="date" id="dailyLogToDate" value="${dailyLogFilterTo}"></label>
+    <label>Location<select id="dailyLogAreaFilter">${areaOpts}</select></label>
+    <button type="button" id="btnDailyLogFilterClear">Clear filters</button>
+  </div>`;
+
+  const fromTs = dailyLogFilterFrom ? new Date(dailyLogFilterFrom + 'T00:00:00').getTime() : null;
+  const toTs = dailyLogFilterTo ? new Date(dailyLogFilterTo + 'T23:59:59').getTime() : null;
+
+  const byDate = {};
+  items.forEach(item => {
+    if(dailyLogFilterArea && item.area !== dailyLogFilterArea) return;
+    (item.log||[]).forEach(l => {
+      const note = l.note || '';
+      if(!note.endsWith('(daily entry)')) return;
+      if(fromTs !== null && !isNaN(fromTs) && l.t < fromTs) return;
+      if(toTs !== null && !isNaN(toTs) && l.t > toTs) return;
+      const d = new Date(l.t);
+      const dateKey = d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+      const dayEndTs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59,999).getTime();
+      if(!byDate[dateKey]) byDate[dateKey] = { sortTs: dayEndTs, rows:{} };
+      const rowKey = item.id;
+      if(!byDate[dateKey].rows[rowKey]){
+        byDate[dateKey].rows[rowKey] = { item, name:item.name, area:item.area, unit:item.unit, in:0, out:0, transferOut:0, transferIn:0, dayEndTs };
+      }
+      const row = byDate[dateKey].rows[rowKey];
+      if(l.delta > 0 && note.startsWith('Received')) row.in = Math.round((row.in + l.delta)*100)/100;
+      else if(l.delta < 0 && note.startsWith('Used')) row.out = Math.round((row.out + Math.abs(l.delta))*100)/100;
+      else if(l.delta < 0 && note.startsWith('Transferred to')) row.transferOut = Math.round((row.transferOut + Math.abs(l.delta))*100)/100;
+      else if(l.delta > 0 && note.startsWith('Transferred from')) row.transferIn = Math.round((row.transferIn + l.delta)*100)/100;
+    });
+  });
+
+  const dateKeys = Object.keys(byDate).sort((a,b) => byDate[b].sortTs - byDate[a].sortTs);
+
+  if(dateKeys.length === 0){
+    const msg = (dailyLogFilterFrom || dailyLogFilterTo || dailyLogFilterArea) ? 'No daily updates matching these filters.' : 'No daily updates logged yet.';
+    wrap.innerHTML = head + filterRow + `<div class="empty">${msg}</div>`;
+    return;
+  }
+
+  const sections = dateKeys.map(dateKey => {
+    const rows = Object.values(byDate[dateKey].rows).sort((a,b) => a.area===b.area ? a.name.localeCompare(b.name) : a.area.localeCompare(b.area));
+    return `
+      <div class="usage-sub">${escapeHtml(dateKey)}</div>
+      <table class="usage-table">
+        <thead><tr>
+          <th>Reagent / supply</th>
+          ${dailyLogFilterArea ? '' : '<th>Location</th>'}
+          <th style="text-align:right;">In</th>
+          <th style="text-align:right;">Out</th>
+          <th style="text-align:right;">Transfer out</th>
+          <th style="text-align:right;">Transfer in</th>
+          <th style="text-align:right;">Balance (end of day)</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const bal = balanceAsOf(r.item, r.dayEndTs);
+            return `<tr>
+              <td>${escapeHtml(r.name)}</td>
+              ${dailyLogFilterArea ? '' : `<td>${escapeHtml(r.area)}</td>`}
+              <td class="num">${r.in ? fmt(r.in) : '\u2014'}</td>
+              <td class="num">${r.out ? fmt(r.out) : '\u2014'}</td>
+              <td class="num">${r.transferOut ? fmt(r.transferOut) : '\u2014'}</td>
+              <td class="num">${r.transferIn ? fmt(r.transferIn) : '\u2014'}</td>
+              <td class="num">${fmt(bal)} ${escapeHtml(r.unit)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }).join('');
+
+  wrap.innerHTML = head + filterRow + sections;
+}
+
+document.getElementById('btnDailyLogReport').addEventListener('click', ()=>{
+  const panel = document.getElementById('dailyLogReportPanel');
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open')) renderDailyLogReport();
+});
+document.getElementById('dailyLogReportPanel').addEventListener('click', (e)=>{
+  if(e.target.closest('[data-act="close-dailylog"]')){
+    document.getElementById('dailyLogReportPanel').classList.remove('open');
+  }
+  if(e.target.id === 'btnDailyLogFilterClear'){
+    dailyLogFilterFrom = '';
+    dailyLogFilterTo = '';
+    dailyLogFilterArea = '';
+    renderDailyLogReport();
+  }
+});
+document.getElementById('dailyLogReportPanel').addEventListener('change', (e)=>{
+  if(e.target.id === 'dailyLogFromDate'){
+    dailyLogFilterFrom = e.target.value;
+    renderDailyLogReport();
+  }
+  if(e.target.id === 'dailyLogToDate'){
+    dailyLogFilterTo = e.target.value;
+    renderDailyLogReport();
+  }
+  if(e.target.id === 'dailyLogAreaFilter'){
+    dailyLogFilterArea = e.target.value;
+    renderDailyLogReport();
+  }
+});
+
 let restockFilterTo = '';
 let restockFilterArea = '';
 let restockFilterItem = '';
+let restockFilterSource = '';
 
 function renderRestockReport(){
   const wrap = document.getElementById('restockReportPanel');
@@ -1601,26 +1960,36 @@ function renderRestockReport(){
   const areaOpts = `<option value="">All areas</option>` + areas.map(a => `<option value="${escapeHtml(a)}" ${restockFilterArea===a?'selected':''}>${escapeHtml(a)}</option>`).join('');
   const itemNames = Array.from(new Set(items.map(i => i.name))).sort((a,b) => a.localeCompare(b));
   const itemOpts = `<option value="">All items</option>` + itemNames.map(n => `<option value="${escapeHtml(n)}" ${restockFilterItem===n?'selected':''}>${escapeHtml(n)}</option>`).join('');
+
+  let allEntries = [];
+  items.forEach(item => {
+    (item.log||[]).forEach(l => {
+      const note = l.note || '';
+      const isRestock = l.delta > 0 && note.startsWith('Restocked');
+      const isDailyReceive = l.delta > 0 && note.startsWith('Received') && note.endsWith('(daily entry)');
+      if(isRestock || isDailyReceive){
+        allEntries.push({ t:l.t, name:item.name, area:item.area, unit:item.unit, qty:l.delta, note, source: extractSource(note) });
+      }
+    });
+  });
+  const sourceNames = Array.from(new Set(allEntries.map(e => e.source))).sort((a,b) => a.localeCompare(b));
+  const sourceOpts = `<option value="">All sources</option>` + sourceNames.map(s => `<option value="${escapeHtml(s)}" ${restockFilterSource===s?'selected':''}>${escapeHtml(s)}</option>`).join('');
+
   const filterRow = `<div class="usage-filter-row">
     <label>From<input type="date" id="restockFromDate" value="${restockFilterFrom}"></label>
     <label>To<input type="date" id="restockToDate" value="${restockFilterTo}"></label>
     <label>Area<select id="restockAreaFilter">${areaOpts}</select></label>
     <label>Item<select id="restockItemFilter">${itemOpts}</select></label>
+    <label>Source<select id="restockSourceFilter">${sourceOpts}</select></label>
     <button type="button" id="btnRestockFilterClear">Clear filters</button>
+    <button type="button" id="btnRestockPrint">Print report</button>
   </div>`;
 
-  let entries = [];
-  items.forEach(item => {
-    (item.log||[]).forEach(l => {
-      const note = l.note || '';
-      if(l.delta > 0 && note.startsWith('Restocked')){
-        entries.push({ t:l.t, name:item.name, area:item.area, unit:item.unit, qty:l.delta, note, source: extractSource(note) });
-      }
-    });
-  });
+  let entries = allEntries.slice();
 
   if(restockFilterArea) entries = entries.filter(e => e.area === restockFilterArea);
   if(restockFilterItem) entries = entries.filter(e => e.name === restockFilterItem);
+  if(restockFilterSource) entries = entries.filter(e => e.source === restockFilterSource);
 
   const fromTs = restockFilterFrom ? new Date(restockFilterFrom + 'T00:00:00').getTime() : null;
   const toTs = restockFilterTo ? new Date(restockFilterTo + 'T23:59:59').getTime() : null;
@@ -1628,7 +1997,7 @@ function renderRestockReport(){
   if(toTs !== null && !isNaN(toTs)) entries = entries.filter(e => e.t <= toTs);
 
   if(entries.length === 0){
-    const msg = (restockFilterFrom || restockFilterTo || restockFilterArea || restockFilterItem) ? 'No restocks matching these filters.' : 'No restocks logged yet.';
+    const msg = (restockFilterFrom || restockFilterTo || restockFilterArea || restockFilterItem || restockFilterSource) ? 'No restocks matching these filters.' : 'No restocks logged yet.';
     wrap.innerHTML = head + filterRow + `<div class="empty">${msg}</div>`;
     return;
   }
@@ -1653,45 +2022,76 @@ function renderRestockReport(){
   const sourceTotals = Object.values(bySourceMap).sort((a,b) => b.total - a.total);
 
   const recent = entries.slice().sort((a,b)=>b.t-a.t).slice(0,40);
+  const chronological = entries.slice().sort((a,b)=>a.t-b.t);
 
   wrap.innerHTML = head + filterRow + `
-    <div class="usage-sub">Total restocked by item</div>
-    <table class="usage-table">
-      <thead><tr>
-        <th>Name / code</th>
-        <th>Areas restocked</th>
-        <th>Restocked from</th>
-        <th style="text-align:right;">Total restocked</th>
-      </tr></thead>
-      <tbody>
-        ${totals.map(r=>{
-          const areaBreakdown = Object.entries(r.byArea).sort((a,b)=>a[0].localeCompare(b[0])).map(([a,q])=>`${escapeHtml(a)}: ${fmt(q)}`).join(' &middot; ');
-          const srcBreakdown = Object.entries(r.bySource).sort((a,b)=>a[0].localeCompare(b[0])).map(([s,q])=>`${escapeHtml(s)}: ${fmt(q)}`).join(' &middot; ');
-          return `<tr><td>${escapeHtml(r.name)}</td><td class="breakdown">${areaBreakdown}</td><td class="breakdown">${srcBreakdown}</td><td class="num">${fmt(r.total)} ${escapeHtml(r.unit)}</td></tr>`;
+    <div id="restockPrintArea">
+      <div class="restock-print-head" style="display:none;">
+        <div style="font-weight:600;">${escapeHtml(sectionUnit || 'RESTOCK REPORT')}</div>
+        <div style="font-size:12px;color:var(--text-dim);">Area: ${escapeHtml(restockFilterArea || 'All areas')}${restockFilterSource ? ` &middot; Source: ${escapeHtml(restockFilterSource)}` : ''} &middot; Period: ${restockFilterFrom ? restockFilterFrom : 'earliest'} \u2013 ${restockFilterTo ? restockFilterTo : 'latest'}</div>
+      </div>
+      <table class="summary-table restock-print-only" style="display:none;">
+        <thead><tr>
+          <th>Date</th>
+          <th>Reagent / supply</th>
+          <th>Area</th>
+          <th>Restocked from</th>
+          <th style="text-align:right;">Quantity</th>
+        </tr></thead>
+        <tbody>
+          ${chronological.map(e => {
+            const d = new Date(e.t);
+            const ds = d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+            return `<tr>
+              <td>${escapeHtml(ds)}</td>
+              <td>${escapeHtml(e.name)}</td>
+              <td>${escapeHtml(e.area)}</td>
+              <td>${escapeHtml(e.source)}</td>
+              <td class="num">${fmt(e.qty)} ${escapeHtml(e.unit)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="restock-onscreen-only">
+      <div class="usage-sub">Total restocked by item</div>
+      <table class="usage-table">
+        <thead><tr>
+          <th>Name / code</th>
+          <th>Areas restocked</th>
+          <th>Restocked from</th>
+          <th style="text-align:right;">Total restocked</th>
+        </tr></thead>
+        <tbody>
+          ${totals.map(r=>{
+            const areaBreakdown = Object.entries(r.byArea).sort((a,b)=>a[0].localeCompare(b[0])).map(([a,q])=>`${escapeHtml(a)}: ${fmt(q)}`).join(' &middot; ');
+            const srcBreakdown = Object.entries(r.bySource).sort((a,b)=>a[0].localeCompare(b[0])).map(([s,q])=>`${escapeHtml(s)}: ${fmt(q)}`).join(' &middot; ');
+            return `<tr><td>${escapeHtml(r.name)}</td><td class="breakdown">${areaBreakdown}</td><td class="breakdown">${srcBreakdown}</td><td class="num">${fmt(r.total)} ${escapeHtml(r.unit)}</td></tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="usage-sub">Total restocked by source</div>
+      <table class="usage-table">
+        <thead><tr>
+          <th>Restocked from</th>
+          <th>Items</th>
+          <th style="text-align:right;">Total restocked</th>
+        </tr></thead>
+        <tbody>
+          ${sourceTotals.map(s=>{
+            const itemBreakdown = Object.entries(s.byItem).sort((a,b)=>a[0].localeCompare(b[0])).map(([n,q])=>`${escapeHtml(n)}: ${fmt(q)}`).join(' &middot; ');
+            return `<tr><td>${escapeHtml(s.source)}</td><td class="breakdown">${itemBreakdown}</td><td class="num">${fmt(s.total)}</td></tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="usage-sub">Recent restocks (latest ${recent.length})</div>
+      <div class="usage-log">
+        ${recent.map(e=>{
+          const d = new Date(e.t);
+          const ds = d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+          return `<div class="row"><span>${ds} — ${escapeHtml(e.name)} (${escapeHtml(e.area)}) — ${escapeHtml(e.note)}</span><span class="pos">+${fmt(e.qty)} ${escapeHtml(e.unit)}</span></div>`;
         }).join('')}
-      </tbody>
-    </table>
-    <div class="usage-sub">Total restocked by source</div>
-    <table class="usage-table">
-      <thead><tr>
-        <th>Restocked from</th>
-        <th>Items</th>
-        <th style="text-align:right;">Total restocked</th>
-      </tr></thead>
-      <tbody>
-        ${sourceTotals.map(s=>{
-          const itemBreakdown = Object.entries(s.byItem).sort((a,b)=>a[0].localeCompare(b[0])).map(([n,q])=>`${escapeHtml(n)}: ${fmt(q)}`).join(' &middot; ');
-          return `<tr><td>${escapeHtml(s.source)}</td><td class="breakdown">${itemBreakdown}</td><td class="num">${fmt(s.total)}</td></tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    <div class="usage-sub">Recent restocks (latest ${recent.length})</div>
-    <div class="usage-log">
-      ${recent.map(e=>{
-        const d = new Date(e.t);
-        const ds = d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
-        return `<div class="row"><span>${ds} — ${escapeHtml(e.name)} (${escapeHtml(e.area)}) — ${escapeHtml(e.note)}</span><span class="pos">+${fmt(e.qty)} ${escapeHtml(e.unit)}</span></div>`;
-      }).join('')}
+      </div>
+      </div>
     </div>
   `;
 }
@@ -1710,7 +2110,13 @@ document.getElementById('restockReportPanel').addEventListener('click', (e)=>{
     restockFilterTo = '';
     restockFilterArea = '';
     restockFilterItem = '';
+    restockFilterSource = '';
     renderRestockReport();
+  }
+  if(e.target.id === 'btnRestockPrint'){
+    document.body.classList.add('printing-restock');
+    window.print();
+    setTimeout(()=> document.body.classList.remove('printing-restock'), 300);
   }
 });
 document.getElementById('restockReportPanel').addEventListener('change', (e)=>{
@@ -1728,6 +2134,10 @@ document.getElementById('restockReportPanel').addEventListener('change', (e)=>{
   }
   if(e.target.id === 'restockItemFilter'){
     restockFilterItem = e.target.value;
+    renderRestockReport();
+  }
+  if(e.target.id === 'restockSourceFilter'){
+    restockFilterSource = e.target.value;
     renderRestockReport();
   }
 });
@@ -1874,6 +2284,223 @@ document.getElementById('disposalReportPanel').addEventListener('change', (e)=>{
   if(e.target.id === 'disposalItemFilter'){
     disposalFilterItem = e.target.value;
     renderDisposalReport();
+  }
+});
+
+let balanceFilterFrom = '';
+let balanceFilterTo = '';
+let balanceFilterArea = '';
+
+function renderBalanceReport(){
+  const wrap = document.getElementById('balanceReportPanel');
+  const head = `<div class="panel-head"><span class="panel-title">Received / used / balance report</span><button class="panel-close" data-act="close-balance" aria-label="Close">&times;</button></div>`;
+  const areaOpts = `<option value="">All locations</option>` + areas.map(a => `<option value="${escapeHtml(a)}" ${balanceFilterArea===a?'selected':''}>${escapeHtml(a)}</option>`).join('');
+  const filterRow = `<div class="usage-filter-row">
+    <label>From<input type="date" id="balanceFromDate" value="${balanceFilterFrom}"></label>
+    <label>To<input type="date" id="balanceToDate" value="${balanceFilterTo}"></label>
+    <label>Location<select id="balanceAreaFilter">${areaOpts}</select></label>
+    <button type="button" id="btnBalanceFilterClear">Clear filters</button>
+    <button type="button" id="btnBalancePrint">Print report</button>
+  </div>`;
+
+  const fromTs = balanceFilterFrom ? new Date(balanceFilterFrom + 'T00:00:00').getTime() : 0;
+  const toTs = balanceFilterTo ? new Date(balanceFilterTo + 'T23:59:59.999').getTime() : Date.now();
+
+  const reportItems = items.filter(i => !balanceFilterArea || i.area === balanceFilterArea)
+    .slice().sort((a,b) => a.area === b.area ? a.name.localeCompare(b.name) : a.area.localeCompare(b.area));
+
+  if(reportItems.length === 0){
+    wrap.innerHTML = head + filterRow + `<div class="empty">No items to report.</div>`;
+    return;
+  }
+
+  const rows = reportItems.map(item => {
+    let received = 0, used = 0;
+    (item.log||[]).forEach(l => {
+      if(l.t < fromTs || l.t > toTs) return;
+      if(l.delta > 0) received = Math.round((received + l.delta) * 100) / 100;
+      else if(l.delta < 0) used = Math.round((used + Math.abs(l.delta)) * 100) / 100;
+    });
+    const opening = balanceAsOf(item, fromTs - 1);
+    const closing = balanceAsOf(item, toTs);
+    return { item, opening, received, used, closing };
+  });
+
+  const dateFmtStr = (s) => new Date(s + 'T00:00:00').toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+  const periodLabel = `${balanceFilterFrom ? dateFmtStr(balanceFilterFrom) : 'earliest record'} \u2013 ${balanceFilterTo ? dateFmtStr(balanceFilterTo) : 'today'}`;
+
+  wrap.innerHTML = head + filterRow + `
+    <div id="balancePrintArea">
+      <div class="balance-print-head" style="display:none;">
+        <div style="font-weight:600;">${escapeHtml(sectionUnit || 'REAGENT / SUPPLY BALANCE REPORT')}</div>
+        <div style="font-size:12px;color:var(--text-dim);">Location: ${escapeHtml(balanceFilterArea || 'All locations')} &middot; Period: ${periodLabel}</div>
+      </div>
+      <table class="summary-table">
+        <thead><tr>
+          <th>Reagent / supply</th>
+          ${balanceFilterArea ? '' : '<th>Location</th>'}
+          <th style="text-align:right;">Opening balance</th>
+          <th style="text-align:right;">Total received</th>
+          <th style="text-align:right;">Total used</th>
+          <th style="text-align:right;">Remaining balance</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td>${escapeHtml(r.item.name)}</td>
+            ${balanceFilterArea ? '' : `<td>${escapeHtml(r.item.area)}</td>`}
+            <td class="num">${fmt(r.opening)} ${escapeHtml(r.item.unit)}</td>
+            <td class="num">${fmt(r.received)} ${escapeHtml(r.item.unit)}</td>
+            <td class="num">${fmt(r.used)} ${escapeHtml(r.item.unit)}</td>
+            <td class="num">${fmt(r.closing)} ${escapeHtml(r.item.unit)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+document.getElementById('btnBalanceReport').addEventListener('click', ()=>{
+  const panel = document.getElementById('balanceReportPanel');
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open')) renderBalanceReport();
+});
+document.getElementById('balanceReportPanel').addEventListener('click', (e)=>{
+  if(e.target.closest('[data-act="close-balance"]')){
+    document.getElementById('balanceReportPanel').classList.remove('open');
+  }
+  if(e.target.id === 'btnBalanceFilterClear'){
+    balanceFilterFrom = '';
+    balanceFilterTo = '';
+    balanceFilterArea = '';
+    renderBalanceReport();
+  }
+  if(e.target.id === 'btnBalancePrint'){
+    document.body.classList.add('printing-balance');
+    window.print();
+    setTimeout(()=> document.body.classList.remove('printing-balance'), 300);
+  }
+});
+document.getElementById('balanceReportPanel').addEventListener('change', (e)=>{
+  if(e.target.id === 'balanceFromDate'){
+    balanceFilterFrom = e.target.value;
+    renderBalanceReport();
+  }
+  if(e.target.id === 'balanceToDate'){
+    balanceFilterTo = e.target.value;
+    renderBalanceReport();
+  }
+  if(e.target.id === 'balanceAreaFilter'){
+    balanceFilterArea = e.target.value;
+    renderBalanceReport();
+  }
+});
+
+let monthlySheetArea = '';
+let monthlySheetMonth = '';
+
+function monthStrNow(){
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tz).toISOString().slice(0,7);
+}
+
+function renderMonthlySheet(){
+  const wrap = document.getElementById('monthlySheetPanel');
+  const head = `<div class="panel-head"><span class="panel-title">Monthly reagent sheet</span><button class="panel-close" data-act="close-monthly" aria-label="Close">&times;</button></div>`;
+  const areaOpts = areas.map(a => `<option value="${escapeHtml(a)}" ${monthlySheetArea===a?'selected':''}>${escapeHtml(a)}</option>`).join('');
+  const filterRow = `<div class="usage-filter-row">
+    <label>Location<select id="monthlySheetAreaFilter">${areaOpts}</select></label>
+    <label>Month<input type="month" id="monthlySheetMonthFilter" value="${monthlySheetMonth}"></label>
+    <button type="button" id="btnMonthlySheetPrint">Print report</button>
+  </div>`;
+
+  if(!monthlySheetArea || !monthlySheetMonth){
+    wrap.innerHTML = head + filterRow + `<div class="empty">Pick a location and month.</div>`;
+    return;
+  }
+
+  const [yearStr, monthNumStr] = monthlySheetMonth.split('-');
+  const year = parseInt(yearStr, 10);
+  const monthNum = parseInt(monthNumStr, 10); // 1-indexed
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  const monthLabel = new Date(year, monthNum - 1, 1).toLocaleDateString(undefined, {month:'long', year:'numeric'});
+
+  const rowItems = items.filter(i => i.area === monthlySheetArea).slice().sort((a,b) => a.name.localeCompare(b.name));
+
+  if(rowItems.length === 0){
+    wrap.innerHTML = head + filterRow + `<div class="empty">${escapeHtml(monthlySheetArea)} has no items yet.</div>`;
+    return;
+  }
+
+  const days = [];
+  for(let d = 1; d <= daysInMonth; d++){
+    days.push({
+      d,
+      startTs: new Date(year, monthNum - 1, d, 0, 0, 0, 0).getTime(),
+      endTs: new Date(year, monthNum - 1, d, 23, 59, 59, 999).getTime()
+    });
+  }
+
+  const dayHeadRow = `<tr><th class="rowname">Reagent / supply</th>${days.map(day => `<th class="dayhead" colspan="3">${day.d}</th>`).join('')}</tr>`;
+  const subHeadRow = `<tr><th class="rowname"></th>${days.map(() => `<th>BAL</th><th>IN</th><th>OUT</th>`).join('')}</tr>`;
+
+  const bodyRows = rowItems.map(item => {
+    const cells = days.map(day => {
+      let dayIn = 0, dayOut = 0;
+      (item.log||[]).forEach(l => {
+        if(l.t < day.startTs || l.t > day.endTs) return;
+        if(l.delta > 0) dayIn = Math.round((dayIn + l.delta) * 100) / 100;
+        else if(l.delta < 0) dayOut = Math.round((dayOut + Math.abs(l.delta)) * 100) / 100;
+      });
+      const bal = balanceAsOf(item, day.endTs);
+      return `<td class="bal">${fmt(bal)}</td><td class="in">${dayIn ? fmt(dayIn) : '\u2014'}</td><td class="out">${dayOut ? fmt(dayOut) : '\u2014'}</td>`;
+    }).join('');
+    return `<tr><td class="rowname">${escapeHtml(item.name)}</td>${cells}</tr>`;
+  }).join('');
+
+  wrap.innerHTML = head + filterRow + `
+    <div class="monthly-print-head" style="display:none;">
+      <div style="font-weight:600;">${escapeHtml(sectionUnit || 'REAGENT CONSUMPTION SHEET')}</div>
+      <div style="font-size:12px;color:var(--text-dim);">Location: ${escapeHtml(monthlySheetArea)} &middot; Month: ${escapeHtml(monthLabel)}</div>
+    </div>
+    <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">Scroll sideways to see the full month. Best printed in landscape (your browser's print dialog has that option).</div>
+    <div class="monthly-table-wrap">
+      <table class="monthly-table">
+        <thead>${dayHeadRow}${subHeadRow}</thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+document.getElementById('btnMonthlySheet').addEventListener('click', ()=>{
+  const panel = document.getElementById('monthlySheetPanel');
+  const willOpen = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+  if(willOpen){
+    if(!monthlySheetArea) monthlySheetArea = (activeArea !== 'all' && areas.includes(activeArea)) ? activeArea : (areas[0] || '');
+    if(!monthlySheetMonth) monthlySheetMonth = monthStrNow();
+    renderMonthlySheet();
+  }
+});
+document.getElementById('monthlySheetPanel').addEventListener('click', (e)=>{
+  if(e.target.closest('[data-act="close-monthly"]')){
+    document.getElementById('monthlySheetPanel').classList.remove('open');
+  }
+  if(e.target.id === 'btnMonthlySheetPrint'){
+    document.body.classList.add('printing-monthly');
+    window.print();
+    setTimeout(()=> document.body.classList.remove('printing-monthly'), 300);
+  }
+});
+document.getElementById('monthlySheetPanel').addEventListener('change', (e)=>{
+  if(e.target.id === 'monthlySheetAreaFilter'){
+    monthlySheetArea = e.target.value;
+    renderMonthlySheet();
+  }
+  if(e.target.id === 'monthlySheetMonthFilter'){
+    monthlySheetMonth = e.target.value;
+    renderMonthlySheet();
   }
 });
 
@@ -2183,6 +2810,8 @@ function bulkRowHtml(pre){
       ${srcOpt('Ordered at NAS')}
       ${srcOpt('na', 'N/A (transfer)')}
     </select></td>
+    <td class="colsrc"><input type="text" data-f="lot" placeholder="e.g. 12345" value="${escapeHtml(pre.lot||'')}" ${isTransferRow?'disabled':''}></td>
+    <td class="colsrc"><input type="date" data-f="expiry" value="${pre.expiry||''}" ${isTransferRow?'disabled':''}></td>
     <td class="coldate"><input type="date" data-f="date" value="${pre.date||todayISO()}"></td>
     <td class="colrm"><button class="bulk-rm" data-act="bulk-rm" aria-label="Remove row">&times;</button></td>
   </tr>`;
@@ -2299,6 +2928,8 @@ function buildBulkPlan(rows){
     const from = get('from'); // '' = not yet chosen, 'external' = supplier, else a location (transfer)
     const to = get('to');
     const source = get('source');
+    const lot = get('lot');
+    const expiry = get('expiry');
     const dateStr = get('date');
     const safeQty = isNaN(qty) ? 0 : qty;
 
@@ -2347,7 +2978,7 @@ function buildBulkPlan(rows){
       availability.set(sourceItem.id, Math.round((avail - safeQty) * 100) / 100);
       plan.push({type:'transfer', item:sourceItem, name, qty:safeQty, from, to, ts});
     }else{
-      plan.push({type:'restock', name, qty:safeQty, to, source, ts});
+      plan.push({type:'restock', name, qty:safeQty, to, source, ts, lot, expiry});
     }
   });
 
@@ -2386,11 +3017,19 @@ function applyBulkPlan(plan){
         if(p.source && !dest.supplier) dest.supplier = p.source;
         dest.log = dest.log || [];
         dest.log.push({t: p.ts, delta: p.qty, note});
+        if(p.lot || p.expiry){
+          dest.batches = dest.batches || [];
+          dest.batches.push({ id: uid(), lot: p.lot, expiry: p.expiry, qtyReceived: p.qty, qtyRemaining: p.qty, received: p.ts, source: p.source });
+        }
       }else{
-        newItems.push({
+        const newItem = {
           id: uid(), name: p.name, unit: 'pcs', qty: p.qty, threshold: 0, area: p.to, supplier: p.source,
           log: [{t: p.ts, delta: p.qty, note: p.source ? `Initial stock — received from ${p.source}` : 'Initial stock'}]
-        });
+        };
+        if(p.lot || p.expiry){
+          newItem.batches = [{ id: uid(), lot: p.lot, expiry: p.expiry, qtyReceived: p.qty, qtyRemaining: p.qty, received: p.ts, source: p.source }];
+        }
+        newItems.push(newItem);
       }
     }
   });
@@ -2470,13 +3109,28 @@ function renderBulkUseItems(){
     wrap.innerHTML = `<tr><td colspan="4" class="transfer-item-empty">${escapeHtml(area)} has no stock to log usage or write off against.</td></tr>`;
     return;
   }
-  wrap.innerHTML = areaItems.map(i => `
+  wrap.innerHTML = areaItems.map(i => {
+    const openBatches = (i.batches || []).filter(b => b.qtyRemaining > 0).slice().sort((a,b) => {
+      if(!a.expiry) return 1;
+      if(!b.expiry) return -1;
+      return a.expiry.localeCompare(b.expiry);
+    });
+    const batchCell = openBatches.length === 0 ? '' : `<select data-use-batch="${i.id}">
+      <option value="">\u2014 none \u2014</option>
+      ${openBatches.map(b => {
+        const expDs = b.expiry ? new Date(b.expiry + 'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : 'no expiry set';
+        return `<option value="${b.id}">${escapeHtml(`Lot ${b.lot || '\u2014'} \u00b7 exp ${expDs} \u00b7 ${fmt(b.qtyRemaining)} left`)}</option>`;
+      }).join('')}
+    </select>`;
+    return `
     <tr>
       <td class="colname">${escapeHtml(i.name)}</td>
       <td class="colnum" style="font-family:var(--mono);font-size:12px;color:var(--text-dim);">${fmt(i.qty)} ${escapeHtml(i.unit)}</td>
       <td class="colnum"><input type="number" min="0" step="0.01" max="${i.qty}" value="0" data-use-qty="${i.id}" data-max="${i.qty}"></td>
       <td class="colsrc"><select data-use-reason="${i.id}">${bulkUseReasonOptions()}</select></td>
-    </tr>`).join('');
+      <td class="colsrc">${batchCell}</td>
+    </tr>`;
+  }).join('');
 }
 
 function resetBulkUseConfirm(){
@@ -2550,7 +3204,17 @@ document.getElementById('btnConfirmBulkUse').addEventListener('click', async ()=
     if(qty <= 0) return;
     const reasonSel = document.querySelector(`[data-use-reason="${id}"]`);
     const reason = reasonSel ? reasonSel.value : '';
-    plan.push({item, qty, reason});
+    const batchSel = document.querySelector(`[data-use-batch="${id}"]`);
+    const batchId = batchSel ? batchSel.value : '';
+    let batch = null;
+    if(batchId){
+      batch = (item.batches || []).find(b => b.id === batchId);
+      if(!batch || qty > batch.qtyRemaining){
+        problems.push(`"${item.name}": only ${batch ? fmt(batch.qtyRemaining) : 0} ${item.unit} left in the selected batch.`);
+        return;
+      }
+    }
+    plan.push({item, qty, reason, batch});
   });
 
   if(problems.length){
@@ -2588,8 +3252,9 @@ document.getElementById('btnConfirmBulkUse').addEventListener('click', async ()=
     if(!isNaN(parsed.getTime())) ts = parsed.getTime();
   }
   const usedNote = note ? `Used — ${note} (bulk usage)` : 'Used (bulk usage)';
-  plan.forEach(({item, qty, reason}) => {
+  plan.forEach(({item, qty, reason, batch}) => {
     item.qty = Math.max(0, Math.round((item.qty - qty) * 100) / 100);
+    if(batch) batch.qtyRemaining = Math.max(0, Math.round((batch.qtyRemaining - qty) * 100) / 100);
     item.log = item.log || [];
     if(reason){
       const writeoffNote = note ? `Written off — ${reason} (${note}) (bulk write-off)` : `Written off — ${reason} (bulk write-off)`;
@@ -2602,6 +3267,487 @@ document.getElementById('btnConfirmBulkUse').addEventListener('click', async ()=
   document.getElementById('bulkUsePanel').classList.remove('open');
   await save();
   render();
+});
+
+let dailyConfirmPending = false;
+let lastDailyUndo = null;
+let undoDailyConfirmPending = false;
+let undoDailyConfirmTimer = null;
+
+function updateUndoDailyButton(){
+  const btn = document.getElementById('btnUndoDaily');
+  if(!btn) return;
+  undoDailyConfirmPending = false;
+  clearTimeout(undoDailyConfirmTimer);
+  if(lastDailyUndo){
+    btn.style.display = '';
+    btn.textContent = `Undo last (${lastDailyUndo.area})`;
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }else{
+    btn.style.display = 'none';
+  }
+}
+
+document.getElementById('btnUndoDaily').addEventListener('click', async ()=>{
+  if(!lastDailyUndo) return;
+  const btn = document.getElementById('btnUndoDaily');
+  if(!undoDailyConfirmPending){
+    undoDailyConfirmPending = true;
+    btn.textContent = 'Confirm undo?';
+    btn.style.color = 'var(--crit)';
+    btn.style.borderColor = 'var(--crit)';
+    clearTimeout(undoDailyConfirmTimer);
+    undoDailyConfirmTimer = setTimeout(()=>{ updateUndoDailyButton(); }, 5000);
+    return;
+  }
+  clearTimeout(undoDailyConfirmTimer);
+  const undo = lastDailyUndo;
+  lastDailyUndo = null;
+  undo.revert();
+  await save();
+  render();
+  updateUndoDailyButton();
+  showToast(`Undid the ${undo.area} daily update from ${undo.dateLabel}.`);
+});
+let dailyConfirmTimer = null;
+
+function populateDailyArea(){
+  const sel = document.getElementById('dailyArea');
+  sel.innerHTML = areas.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+  if(activeArea !== 'all' && areas.includes(activeArea)) sel.value = activeArea;
+}
+
+function renderDailyItems(){
+  const area = document.getElementById('dailyArea').value;
+  const dateStr = document.getElementById('dailyDate').value;
+  const wrap = document.getElementById('dailyItems');
+  const areaItems = items.filter(i => i.area === area).slice().sort((a,b) => a.name.localeCompare(b.name));
+  const otherAreas = areas.filter(a => a !== area);
+  if(areaItems.length === 0){
+    wrap.innerHTML = `<tr><td colspan="6" class="transfer-item-empty">${escapeHtml(area)} has no items yet.</td></tr>`;
+    return;
+  }
+  const dayStartTs = dateStr ? new Date(dateStr + 'T00:00:00').getTime() : null;
+  const dayEndTs = dateStr ? new Date(dateStr + 'T23:59:59.999').getTime() : null;
+
+  function alreadyLoggedLabel(item){
+    if(dayStartTs === null) return '';
+    let inQty = 0, outQty = 0, transferOutQty = 0, transferInQty = 0;
+    const transferOutTo = new Set();
+    const transferInFrom = new Set();
+    (item.log||[]).forEach(l => {
+      const n = l.note || '';
+      if(!n.endsWith('(daily entry)')) return;
+      if(l.t < dayStartTs || l.t > dayEndTs) return;
+      if(l.delta > 0 && n.startsWith('Received')){
+        inQty = Math.round((inQty + l.delta) * 100) / 100;
+      }else if(l.delta > 0 && n.startsWith('Transferred from')){
+        transferInQty = Math.round((transferInQty + l.delta) * 100) / 100;
+        let base = n.replace(/^Transferred from /, '').replace(/\s*\(daily entry\)$/, '');
+        transferInFrom.add((base.includes(' — ') ? base.split(' — ')[0] : base).trim());
+      }else if(l.delta < 0 && n.startsWith('Used')){
+        outQty = Math.round((outQty + Math.abs(l.delta)) * 100) / 100;
+      }else if(l.delta < 0 && n.startsWith('Transferred to')){
+        transferOutQty = Math.round((transferOutQty + Math.abs(l.delta)) * 100) / 100;
+        let base = n.replace(/^Transferred to /, '').replace(/\s*\(daily entry\)$/, '');
+        transferOutTo.add((base.includes(' — ') ? base.split(' — ')[0] : base).trim());
+      }
+    });
+    const parts = [];
+    if(inQty > 0) parts.push(`+${fmt(inQty)} in`);
+    if(transferInQty > 0) parts.push(`+${fmt(transferInQty)} in from ${Array.from(transferInFrom).join(', ')}`);
+    if(outQty > 0) parts.push(`-${fmt(outQty)} out`);
+    if(transferOutQty > 0) parts.push(`-${fmt(transferOutQty)} sent to ${Array.from(transferOutTo).join(', ')}`);
+    if(parts.length === 0) return '';
+    return `<div style="font-size:10px;color:var(--warn);margin-top:2px;">Already today: ${escapeHtml(parts.join(', '))}</div>`;
+  }
+
+  const toCell = otherAreas.length === 0
+    ? `<span style="font-size:11px;color:var(--text-faint);">no other location</span>`
+    : `<select data-daily-to="__ID__"><option value="">\u2014</option>${otherAreas.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}</select>`;
+  wrap.innerHTML = areaItems.map(i => `
+    <tr>
+      <td class="colname">${escapeHtml(i.name)}${alreadyLoggedLabel(i)}</td>
+      <td class="colnum" style="font-family:var(--mono);font-size:12px;color:var(--text-dim);">${fmt(i.qty)} ${escapeHtml(i.unit)}</td>
+      <td class="colin">
+        <input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-in="${i.id}">
+        <input type="text" data-daily-in-source="${i.id}" placeholder="${escapeHtml(i.supplier || 'source / location')}">
+      </td>
+      <td class="colnum"><input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-out="${i.id}" data-max="${i.qty}"></td>
+      <td class="colnum"><input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-transfer="${i.id}"></td>
+      <td class="colloc">${toCell.replace('__ID__', i.id)}</td>
+    </tr>`).join('');
+}
+
+function checkDailyDuplicate(){
+  const warnEl = document.getElementById('dailyDupWarn');
+  const area = document.getElementById('dailyArea').value;
+  const dateStr = document.getElementById('dailyDate').value;
+  if(!area || !dateStr){ warnEl.style.display = 'none'; return; }
+  const dayStart = new Date(dateStr + 'T00:00:00').getTime();
+  const dayEnd = new Date(dateStr + 'T23:59:59.999').getTime();
+  const already = items.some(i => i.area === area && (i.log||[]).some(l =>
+    (l.note||'').endsWith('(daily entry)') && l.t >= dayStart && l.t <= dayEnd
+  ));
+  if(already){
+    const ds = new Date(dateStr + 'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    warnEl.textContent = `A daily update for ${area} on ${ds} was already logged — saving again will add to it, not replace it.`;
+    warnEl.style.display = 'block';
+  }else{
+    warnEl.style.display = 'none';
+  }
+}
+
+function resetDailyConfirm(){
+  dailyConfirmPending = false;
+  clearTimeout(dailyConfirmTimer);
+  const btn = document.getElementById('btnConfirmDaily');
+  btn.textContent = 'Save daily update';
+  btn.style.background = '';
+  btn.style.borderColor = '';
+  btn.style.color = '';
+}
+
+document.getElementById('btnCopyYesterday').addEventListener('click', ()=>{
+  const area = document.getElementById('dailyArea').value;
+  const dateStr = document.getElementById('dailyDate').value;
+  if(!area || !dateStr) return;
+  const beforeTs = new Date(dateStr + 'T00:00:00').getTime();
+
+  // find the most recent daily-entry timestamp strictly before the selected date, for this location
+  let lastTs = null;
+  items.forEach(i => {
+    if(i.area !== area) return;
+    (i.log||[]).forEach(l => {
+      const note = l.note || '';
+      if(!note.endsWith('(daily entry)')) return;
+      if(l.t < beforeTs && (lastTs === null || l.t > lastTs)) lastTs = l.t;
+    });
+  });
+  if(lastTs === null){
+    showToast(`No previous daily entry found for ${area}.`);
+    return;
+  }
+  const dayStartTs = new Date(new Date(lastTs).setHours(0,0,0,0)).getTime();
+  const dayEndTs = new Date(new Date(lastTs).setHours(23,59,59,999)).getTime();
+
+  const byItem = {};
+  items.forEach(item => {
+    if(item.area !== area) return;
+    (item.log||[]).forEach(l => {
+      const note = l.note || '';
+      if(!note.endsWith('(daily entry)')) return;
+      if(l.t < dayStartTs || l.t > dayEndTs) return;
+      if(!byItem[item.id]) byItem[item.id] = {in:0, out:0, transfer:0, to:'', source:''};
+      const row = byItem[item.id];
+      if(l.delta > 0 && note.startsWith('Received')){
+        row.in = Math.round((row.in + l.delta) * 100) / 100;
+        const src = extractSource(note);
+        if(src && src !== 'Unspecified') row.source = src;
+      }else if(l.delta > 0 && note.startsWith('Transferred from')){
+        row.in = Math.round((row.in + l.delta) * 100) / 100;
+        let base = note.replace(/^Transferred from /, '').replace(/\s*\(daily entry\)$/, '');
+        row.source = (base.includes(' — ') ? base.split(' — ')[0] : base).trim();
+      }else if(l.delta < 0 && note.startsWith('Used')){
+        row.out = Math.round((row.out + Math.abs(l.delta)) * 100) / 100;
+      }else if(l.delta < 0 && note.startsWith('Transferred to')){
+        row.transfer = Math.round((row.transfer + Math.abs(l.delta)) * 100) / 100;
+        let base = note.replace(/^Transferred to /, '').replace(/\s*\(daily entry\)$/, '');
+        row.to = (base.includes(' — ') ? base.split(' — ')[0] : base).trim();
+      }
+    });
+  });
+
+  let applied = 0;
+  Object.entries(byItem).forEach(([id, row]) => {
+    const inEl = document.querySelector(`[data-daily-in="${id}"]`);
+    const inSourceEl = document.querySelector(`[data-daily-in-source="${id}"]`);
+    const outEl = document.querySelector(`[data-daily-out="${id}"]`);
+    const transferEl = document.querySelector(`[data-daily-transfer="${id}"]`);
+    const toEl = document.querySelector(`[data-daily-to="${id}"]`);
+    if(inEl && row.in > 0){
+      inEl.value = row.in;
+      if(inSourceEl && row.source) inSourceEl.value = row.source;
+      applied++;
+    }
+    if(outEl && row.out > 0){ outEl.value = row.out; applied++; }
+    if(transferEl && row.transfer > 0){
+      transferEl.value = row.transfer;
+      applied++;
+      if(toEl && row.to){
+        const opt = Array.from(toEl.options).find(o => o.value === row.to);
+        if(opt) toEl.value = row.to;
+      }
+    }
+  });
+  resetDailyConfirm();
+  const ds = new Date(lastTs).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  showToast(applied ? `Copied ${ds}'s entries for ${area}.` : `No values to copy from ${ds}.`);
+});
+
+document.getElementById('btnFillSuppliers').addEventListener('click', ()=>{
+  let filled = 0;
+  document.querySelectorAll('#dailyItems [data-daily-in]').forEach(inEl => {
+    const id = inEl.dataset.dailyIn;
+    const item = items.find(i => i.id === id);
+    if(!item || !item.supplier) return;
+    const inQty = parseFloat(inEl.value);
+    if(isNaN(inQty) || inQty <= 0) return;
+    const srcEl = document.querySelector(`[data-daily-in-source="${id}"]`);
+    if(srcEl && !srcEl.value.trim()){
+      srcEl.value = item.supplier;
+      filled++;
+    }
+  });
+  showToast(filled ? `Filled ${filled} source${filled===1?'':'s'} from usual supplier.` : 'No blank sources to fill — enter an In quantity first, or all rows already have a source.');
+});
+
+document.getElementById('btnDailyUpdate').addEventListener('click', ()=>{
+  populateDailyArea();
+  document.getElementById('dailyDate').value = todayISO();
+  renderDailyItems();
+  document.getElementById('dailyNote').value = '';
+  document.getElementById('dailySource').value = '';
+  document.getElementById('dailyErr').style.display = 'none';
+  resetDailyConfirm();
+  checkDailyDuplicate();
+  document.getElementById('dailyUpdatePanel').classList.add('open');
+});
+document.getElementById('btnCancelDaily').addEventListener('click', ()=>{
+  resetDailyConfirm();
+  document.getElementById('dailyUpdatePanel').classList.remove('open');
+});
+document.getElementById('btnCancelDailyX').addEventListener('click', ()=>{
+  resetDailyConfirm();
+  document.getElementById('dailyUpdatePanel').classList.remove('open');
+});
+document.getElementById('dailyArea').addEventListener('change', ()=>{
+  renderDailyItems();
+  resetDailyConfirm();
+  checkDailyDuplicate();
+});
+document.getElementById('dailyDate').addEventListener('change', ()=>{
+  renderDailyItems();
+  resetDailyConfirm();
+  checkDailyDuplicate();
+});
+document.getElementById('dailyItems').addEventListener('input', (e)=>{
+  if(e.target.matches('[data-daily-in],[data-daily-out],[data-daily-transfer]')) resetDailyConfirm();
+});
+document.getElementById('dailyItems').addEventListener('change', (e)=>{
+  if(e.target.matches('[data-daily-to]')) resetDailyConfirm();
+});
+
+document.getElementById('btnConfirmDaily').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('dailyErr');
+  errEl.style.display = 'none';
+  const area = document.getElementById('dailyArea').value;
+  const note = document.getElementById('dailyNote').value.trim();
+  const source = document.getElementById('dailySource').value.trim();
+  const btn = document.getElementById('btnConfirmDaily');
+
+  const inRows = Array.from(document.querySelectorAll('#dailyItems [data-daily-in]'));
+  const problems = [];
+  const plan = [];
+  inRows.forEach(inEl => {
+    const id = inEl.dataset.dailyIn;
+    const item = items.find(i => i.id === id);
+    if(!item) return;
+    const outEl = document.querySelector(`[data-daily-out="${id}"]`);
+    const transferEl = document.querySelector(`[data-daily-transfer="${id}"]`);
+    const toEl = document.querySelector(`[data-daily-to="${id}"]`);
+    const inSourceEl = document.querySelector(`[data-daily-in-source="${id}"]`);
+    const inRaw = inEl.value.trim();
+    const outRaw = outEl ? outEl.value.trim() : '';
+    const transferRaw = transferEl ? transferEl.value.trim() : '';
+    const inQty = inRaw === '' ? 0 : parseFloat(inRaw);
+    const outQty = outRaw === '' ? 0 : parseFloat(outRaw);
+    const transferQty = transferRaw === '' ? 0 : parseFloat(transferRaw);
+    const transferTo = toEl ? toEl.value : '';
+    const rowSource = (inSourceEl ? inSourceEl.value.trim() : '') || source;
+    if(inRaw !== '' && (isNaN(inQty) || inQty < 0)){
+      problems.push(`"${item.name}": In must be 0 or greater.`);
+      return;
+    }
+    if(outRaw !== '' && (isNaN(outQty) || outQty < 0)){
+      problems.push(`"${item.name}": Out must be 0 or greater.`);
+      return;
+    }
+    if(transferRaw !== '' && (isNaN(transferQty) || transferQty < 0)){
+      problems.push(`"${item.name}": Transfer must be 0 or greater.`);
+      return;
+    }
+    if(transferQty > 0 && !transferTo){
+      problems.push(`"${item.name}": pick a destination for the transfer.`);
+      return;
+    }
+    const availableAfterInOut = Math.round((item.qty + inQty - outQty) * 100) / 100;
+    if(outQty > Math.round((item.qty + inQty) * 100) / 100){
+      problems.push(`"${item.name}": Out (${fmt(outQty)}) can't exceed balance + in (${fmt(Math.round((item.qty + inQty) * 100) / 100)}).`);
+      return;
+    }
+    if(transferQty > availableAfterInOut){
+      problems.push(`"${item.name}": Transfer (${fmt(transferQty)}) can't exceed balance + in − out (${fmt(availableAfterInOut)}).`);
+      return;
+    }
+    let internalFromArea = null;
+    let internalFromItem = null;
+    if(inQty > 0 && rowSource){
+      const matchedArea = areas.find(a => a.toLowerCase() === rowSource.toLowerCase());
+      if(matchedArea && matchedArea !== area){
+        internalFromArea = matchedArea;
+        internalFromItem = items.find(i => i.area === matchedArea && i.name.toLowerCase() === item.name.toLowerCase());
+        if(!internalFromItem){
+          problems.push(`"${item.name}": ${matchedArea} doesn't have this reagent to transfer from.`);
+          return;
+        }
+        if(internalFromItem.qty < inQty){
+          problems.push(`"${item.name}": ${matchedArea} only has ${fmt(internalFromItem.qty)} ${item.unit} to transfer.`);
+          return;
+        }
+      }
+    }
+    if(inQty <= 0 && outQty <= 0 && transferQty <= 0) return;
+    plan.push({item, inQty, outQty, transferQty, transferTo, inSource: rowSource, internalFromArea, internalFromItem});
+  });
+
+  if(problems.length){
+    errEl.textContent = problems.join('\n');
+    errEl.style.display = 'block';
+    return;
+  }
+  if(plan.length === 0){
+    errEl.textContent = 'Enter In, Out, or Transfer for at least one item.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  if(!dailyConfirmPending){
+    dailyConfirmPending = true;
+    const inCount = plan.filter(p => p.inQty > 0 && !p.internalFromArea).length;
+    const inTransferCount = plan.filter(p => p.inQty > 0 && p.internalFromArea).length;
+    const outCount = plan.filter(p => p.outQty > 0).length;
+    const transferCount = plan.filter(p => p.transferQty > 0).length;
+    const parts = [];
+    if(inCount) parts.push(`${inCount} received`);
+    if(inTransferCount) parts.push(`${inTransferCount} transferred in`);
+    if(outCount) parts.push(`${outCount} used`);
+    if(transferCount) parts.push(`${transferCount} transferred out`);
+    btn.textContent = `Confirm — ${parts.join(', ')}?`;
+    btn.style.background = 'var(--crit-dim)';
+    btn.style.borderColor = 'var(--crit)';
+    btn.style.color = 'var(--crit)';
+    clearTimeout(dailyConfirmTimer);
+    dailyConfirmTimer = setTimeout(resetDailyConfirm, 5000);
+    return;
+  }
+
+  resetDailyConfirm();
+  const dateStr = document.getElementById('dailyDate').value;
+  const ts = dateStr ? tsFromDateInput(dateStr) : Date.now();
+  const revertSteps = [];
+  plan.forEach(({item, inQty, outQty, transferQty, transferTo, inSource, internalFromArea, internalFromItem}) => {
+    item.log = item.log || [];
+    if(inQty > 0 && internalFromArea && internalFromItem){
+      // Internal transfer in: pull the stock from the source location's matching item.
+      internalFromItem.qty = Math.max(0, Math.round((internalFromItem.qty - inQty) * 100) / 100);
+      internalFromItem.log = internalFromItem.log || [];
+      const outEntry = {t: ts, delta: -inQty, note: `Transferred to ${area}${note ? ` — ${note}` : ''} (daily entry)`};
+      internalFromItem.log.push(outEntry);
+      revertSteps.push(() => {
+        internalFromItem.qty = Math.round((internalFromItem.qty + inQty) * 100) / 100;
+        const idx = internalFromItem.log.indexOf(outEntry);
+        if(idx !== -1) internalFromItem.log.splice(idx, 1);
+      });
+      item.qty = Math.round((item.qty + inQty) * 100) / 100;
+      const inEntry = {t: ts, delta: inQty, note: `Transferred from ${internalFromArea}${note ? ` — ${note}` : ''} (daily entry)`};
+      item.log.push(inEntry);
+      revertSteps.push(() => {
+        item.qty = Math.max(0, Math.round((item.qty - inQty) * 100) / 100);
+        const idx = item.log.indexOf(inEntry);
+        if(idx !== -1) item.log.splice(idx, 1);
+      });
+    }else if(inQty > 0){
+      item.qty = Math.round((item.qty + inQty) * 100) / 100;
+      let receivedNote = 'Received';
+      if(note) receivedNote += ` — ${note}`;
+      if(inSource) receivedNote += ` — received from ${inSource}`;
+      receivedNote += ' (daily entry)';
+      const entry = {t: ts, delta: inQty, note: receivedNote};
+      item.log.push(entry);
+      revertSteps.push(() => {
+        item.qty = Math.max(0, Math.round((item.qty - inQty) * 100) / 100);
+        const idx = item.log.indexOf(entry);
+        if(idx !== -1) item.log.splice(idx, 1);
+      });
+    }
+    if(outQty > 0){
+      item.qty = Math.max(0, Math.round((item.qty - outQty) * 100) / 100);
+      const entry = {t: ts, delta: -outQty, note: note ? `Used — ${note} (daily entry)` : 'Used (daily entry)'};
+      item.log.push(entry);
+      revertSteps.push(() => {
+        item.qty = Math.round((item.qty + outQty) * 100) / 100;
+        const idx = item.log.indexOf(entry);
+        if(idx !== -1) item.log.splice(idx, 1);
+      });
+    }
+    if(transferQty > 0 && transferTo){
+      item.qty = Math.max(0, Math.round((item.qty - transferQty) * 100) / 100);
+      const outEntry = {t: ts, delta: -transferQty, note: `Transferred to ${transferTo}${note ? ` — ${note}` : ''} (daily entry)`};
+      item.log.push(outEntry);
+      revertSteps.push(() => {
+        item.qty = Math.round((item.qty + transferQty) * 100) / 100;
+        const idx = item.log.indexOf(outEntry);
+        if(idx !== -1) item.log.splice(idx, 1);
+      });
+      const existing = items.find(i => i.id !== item.id && i.area === transferTo && i.name.toLowerCase() === item.name.toLowerCase());
+      if(existing){
+        existing.qty = Math.round((existing.qty + transferQty) * 100) / 100;
+        existing.log = existing.log || [];
+        const inEntry = {t: ts, delta: transferQty, note: `Transferred from ${item.area}${note ? ` — ${note}` : ''} (daily entry)`};
+        existing.log.push(inEntry);
+        revertSteps.push(() => {
+          existing.qty = Math.max(0, Math.round((existing.qty - transferQty) * 100) / 100);
+          const idx = existing.log.indexOf(inEntry);
+          if(idx !== -1) existing.log.splice(idx, 1);
+        });
+      }else{
+        const newItem = {
+          id: uid(), name: item.name, unit: item.unit, qty: transferQty, threshold: item.threshold, area: transferTo,
+          log: [{t: ts, delta: transferQty, note: `Transferred from ${item.area}${note ? ` — ${note}` : ''} (daily entry)`}]
+        };
+        items.push(newItem);
+        revertSteps.push(() => {
+          items = items.filter(i => i.id !== newItem.id);
+        });
+      }
+    }
+  });
+
+  document.getElementById('dailyUpdatePanel').classList.remove('open');
+  await save();
+  render();
+
+  const affectedItems = new Set();
+  plan.forEach(p => {
+    if(p.outQty > 0 || p.transferQty > 0) affectedItems.add(p.item);
+    if(p.inQty > 0 && p.internalFromArea && p.internalFromItem) affectedItems.add(p.internalFromItem);
+  });
+  const lowNames = Array.from(new Set(
+    Array.from(affectedItems).filter(it => statusOf(it) !== 'ok').map(it => it.name)
+  )).sort((a,b) => a.localeCompare(b));
+
+  let toastMsg = `Daily update saved for ${area}`;
+  if(lowNames.length) toastMsg += ` — now low: ${lowNames.join(', ')}`;
+  showToast(toastMsg);
+
+  lastDailyUndo = {
+    area,
+    dateLabel: new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}),
+    revert: () => { revertSteps.forEach(fn => fn()); }
+  };
+  updateUndoDailyButton();
 });
 
 document.getElementById('areaTabs').addEventListener('click', async (e)=>{
@@ -2684,6 +3830,12 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     card.querySelector('[data-panel="unitopen"]').classList.toggle('open');
     return;
   }
+  if(act === 'scan-barcode'){
+    const panel = card.querySelector('[data-panel="unitopen"]');
+    const targetInput = panel.querySelector('[data-el="unitopen-barcode"]');
+    openBarcodeScanner(targetInput);
+    return;
+  }
   if(act === 'unitopen-cancel'){
     card.querySelector('[data-panel="unitopen"]').classList.remove('open');
     return;
@@ -2692,6 +3844,7 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const panel = card.querySelector('[data-panel="unitopen"]');
     const errEl = panel.querySelector('[data-el="unitopen-err"]');
     const barcodeEl = panel.querySelector('[data-el="unitopen-barcode"]');
+    const batchEl = panel.querySelector('[data-el="unitopen-batch"]');
     const lotEl = panel.querySelector('[data-el="unitopen-lot"]');
     const expiryEl = panel.querySelector('[data-el="unitopen-expiry"]');
     const receivedEl = panel.querySelector('[data-el="unitopen-received"]');
@@ -2699,6 +3852,7 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const noteEl = panel.querySelector('[data-el="unitopen-note"]');
     const dateEl = panel.querySelector('[data-el="unitopen-date"]');
     const barcode = barcodeEl.value.trim();
+    const batchId = batchEl ? batchEl.value : '';
     const lot = lotEl.value.trim();
     const expiry = expiryEl.value || '';
     const received = receivedEl.value || '';
@@ -2710,13 +3864,23 @@ document.getElementById('list').addEventListener('click', async (e)=>{
       errEl.style.display = 'block';
       return;
     }
+    let batch = null;
+    if(batchId){
+      batch = (item.batches || []).find(b => b.id === batchId);
+      if(!batch || batch.qtyRemaining < 1){
+        errEl.textContent = 'That batch has no remaining stock — pick another or fill in manually.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
     const now = tsFromDateInput(dateEl.value);
     item.qty = Math.max(0, Math.round((item.qty - 1)*100)/100);
+    if(batch) batch.qtyRemaining = Math.max(0, Math.round((batch.qtyRemaining - 1)*100)/100);
     item.units = item.units || [];
     item.units.push({
       id: uid(), barcode, note, opened: now, status: 'open',
       lot, expiryUnopened: expiry, received: received ? tsFromDateInput(received) : null,
-      retention: retention || 'Until expiry',
+      retention: retention || 'Until expiry', batchId: batch ? batch.id : null,
     });
     item.log = item.log || [];
     item.log.push({t: now, delta: -1, note: `Opened unit${barcode ? ' \u2014 barcode ' + barcode : ''}${note ? ' (' + note + ')' : ''}`});
@@ -2759,8 +3923,10 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const errEl = panel.querySelector('[data-el="transfer-err"]');
     const qtyEl = panel.querySelector('[data-el="transfer-qty"]');
     const destEl = panel.querySelector('[data-el="transfer-dest"]');
+    const batchEl = panel.querySelector('[data-el="transfer-batch"]');
     const qty = parseFloat(qtyEl.value);
     const dest = destEl.value;
+    const batchId = batchEl ? batchEl.value : '';
     errEl.style.display = 'none';
     if(!dest){
       errEl.textContent = 'No other location to transfer to.';
@@ -2772,22 +3938,40 @@ document.getElementById('list').addEventListener('click', async (e)=>{
       errEl.style.display = 'block';
       return;
     }
+    let batch = null;
+    if(batchId){
+      batch = (item.batches || []).find(b => b.id === batchId);
+      if(!batch || qty > batch.qtyRemaining){
+        errEl.textContent = batch ? `Only ${fmt(batch.qtyRemaining)} ${item.unit} left in that batch.` : 'That batch is no longer available.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
     const dateEl = panel.querySelector('[data-el="transfer-date"]');
     const now = tsFromDateInput(dateEl.value);
     item.qty = Math.round((item.qty - qty)*100)/100;
     item.log = item.log || [];
     item.log.push({t:now, delta:-qty, note:`Transferred to ${dest}`});
+    if(batch) batch.qtyRemaining = Math.round((batch.qtyRemaining - qty)*100)/100;
 
     const existing = items.find(i => i.id !== item.id && i.area === dest && i.name.toLowerCase() === item.name.toLowerCase());
     if(existing){
       existing.qty = Math.round((existing.qty + qty)*100)/100;
       existing.log = existing.log || [];
       existing.log.push({t:now, delta:qty, note:`Transferred from ${item.area}`});
+      if(batch){
+        existing.batches = existing.batches || [];
+        existing.batches.push({ id: uid(), lot: batch.lot, expiry: batch.expiry, qtyReceived: qty, qtyRemaining: qty, received: now, source: `Transferred from ${item.area}` });
+      }
     }else{
-      items.push({
+      const newItem = {
         id: uid(), name:item.name, unit:item.unit, qty, threshold:item.threshold, area:dest,
         log:[{t:now, delta:qty, note:`Transferred from ${item.area}`}]
-      });
+      };
+      if(batch){
+        newItem.batches = [{ id: uid(), lot: batch.lot, expiry: batch.expiry, qtyReceived: qty, qtyRemaining: qty, received: now, source: `Transferred from ${item.area}` }];
+      }
+      items.push(newItem);
     }
     await save();
     render();
@@ -2807,8 +3991,12 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const errEl = panel.querySelector('[data-el="restock-err"]');
     const qtyEl = panel.querySelector('[data-el="restock-qty"]');
     const sourceEl = panel.querySelector('[data-el="restock-source"]');
+    const lotEl = panel.querySelector('[data-el="restock-lot"]');
+    const expiryEl = panel.querySelector('[data-el="restock-expiry"]');
     const qty = parseFloat(qtyEl.value);
     const source = sourceEl.value.trim();
+    const lot = lotEl.value.trim();
+    const expiry = expiryEl.value || '';
     errEl.style.display = 'none';
     if(!qty || qty <= 0){
       errEl.textContent = 'Enter a quantity greater than 0.';
@@ -2816,9 +4004,17 @@ document.getElementById('list').addEventListener('click', async (e)=>{
       return;
     }
     const dateEl = panel.querySelector('[data-el="restock-date"]');
+    const receivedTs = tsFromDateInput(dateEl.value);
     item.qty = Math.round((item.qty + qty)*100)/100;
     item.log = item.log || [];
-    item.log.push({t:tsFromDateInput(dateEl.value), delta:qty, note: source ? `Restocked — received from ${source}` : 'Restocked'});
+    item.log.push({t: receivedTs, delta:qty, note: source ? `Restocked — received from ${source}` : 'Restocked'});
+    if(lot || expiry){
+      item.batches = item.batches || [];
+      item.batches.push({
+        id: uid(), lot, expiry, qtyReceived: qty, qtyRemaining: qty,
+        received: receivedTs, source,
+      });
+    }
     panel.classList.remove('open');
     await save();
     render();
@@ -2838,16 +4034,28 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const errEl = panel.querySelector('[data-el="usage-err"]');
     const qtyEl = panel.querySelector('[data-el="usage-qty"]');
     const noteEl = panel.querySelector('[data-el="usage-note"]');
+    const batchEl = panel.querySelector('[data-el="usage-batch"]');
     const qty = parseFloat(qtyEl.value);
     const note = noteEl.value.trim();
+    const batchId = batchEl ? batchEl.value : '';
     errEl.style.display = 'none';
     if(!qty || qty <= 0 || qty > item.qty){
       errEl.textContent = `Enter a quantity between 0 and ${fmt(item.qty)}.`;
       errEl.style.display = 'block';
       return;
     }
+    let batch = null;
+    if(batchId){
+      batch = (item.batches || []).find(b => b.id === batchId);
+      if(!batch || qty > batch.qtyRemaining){
+        errEl.textContent = batch ? `Only ${fmt(batch.qtyRemaining)} ${item.unit} left in that batch.` : 'That batch is no longer available.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
     const dateEl = panel.querySelector('[data-el="usage-date"]');
     item.qty = Math.max(0, Math.round((item.qty - qty)*100)/100);
+    if(batch) batch.qtyRemaining = Math.max(0, Math.round((batch.qtyRemaining - qty)*100)/100);
     item.log = item.log || [];
     item.log.push({t:tsFromDateInput(dateEl.value), delta:-qty, note: note ? `Used — ${note}` : 'Used'});
     panel.classList.remove('open');
@@ -2934,17 +4142,29 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     const qtyEl = panel.querySelector('[data-el="writeoff-qty"]');
     const reasonEl = panel.querySelector('[data-el="writeoff-reason"]');
     const noteEl = panel.querySelector('[data-el="writeoff-note"]');
+    const batchEl = panel.querySelector('[data-el="writeoff-batch"]');
     const qty = parseFloat(qtyEl.value);
     const reason = reasonEl.value;
     const note = noteEl.value.trim();
+    const batchId = batchEl ? batchEl.value : '';
     errEl.style.display = 'none';
     if(!qty || qty <= 0 || qty > item.qty){
       errEl.textContent = `Enter a quantity between 0 and ${fmt(item.qty)}.`;
       errEl.style.display = 'block';
       return;
     }
+    let batch = null;
+    if(batchId){
+      batch = (item.batches || []).find(b => b.id === batchId);
+      if(!batch || qty > batch.qtyRemaining){
+        errEl.textContent = batch ? `Only ${fmt(batch.qtyRemaining)} ${item.unit} left in that batch.` : 'That batch is no longer available.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
     const dateEl = panel.querySelector('[data-el="writeoff-date"]');
     item.qty = Math.max(0, Math.round((item.qty - qty)*100)/100);
+    if(batch) batch.qtyRemaining = Math.max(0, Math.round((batch.qtyRemaining - qty)*100)/100);
     item.log = item.log || [];
     item.log.push({t:tsFromDateInput(dateEl.value), delta:-qty, note: note ? `Written off — ${reason} (${note})` : `Written off — ${reason}`});
     panel.classList.remove('open');
@@ -3031,6 +4251,25 @@ document.getElementById('list').addEventListener('click', async (e)=>{
     render();
     showToast(`Deleted ${item.name}`);
   }
+});
+
+document.getElementById('list').addEventListener('change', (e)=>{
+  if(!e.target.matches('[data-el="unitopen-batch"]')) return;
+  const card = e.target.closest('.card');
+  const id = card.dataset.id;
+  const item = items.find(i=>i.id===id);
+  if(!item) return;
+  const panel = e.target.closest('[data-panel="unitopen"]');
+  const lotEl = panel.querySelector('[data-el="unitopen-lot"]');
+  const expiryEl = panel.querySelector('[data-el="unitopen-expiry"]');
+  const receivedEl = panel.querySelector('[data-el="unitopen-received"]');
+  const batchId = e.target.value;
+  if(!batchId) return;
+  const batch = (item.batches || []).find(b => b.id === batchId);
+  if(!batch) return;
+  lotEl.value = batch.lot || '';
+  expiryEl.value = batch.expiry || '';
+  if(batch.received) receivedEl.value = new Date(batch.received).toISOString().slice(0,10);
 });
 
 // load() is now triggered by the auth flow above once a session is confirmed.
