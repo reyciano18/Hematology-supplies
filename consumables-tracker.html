@@ -1169,7 +1169,7 @@ function renderCard(item){
     const st = statusOf(item);
     const pct = item.threshold > 0 ? Math.min(100, (item.qty / (item.threshold*2)) * 100) : (item.qty>0?100:0);
     const logWithIdx = (item.log||[]).map((l, idx) => ({...l, idx}));
-    const recentLog = logWithIdx.slice().reverse().slice(0,12);
+    const recentLog = logWithIdx.slice().sort((a,b) => b.t - a.t).slice(0,12);
     const logRows = recentLog.length === 0
       ? '<div class="log-entry"><span>No activity yet</span></div>'
       : recentLog.map(l=>{
@@ -3366,18 +3366,27 @@ function renderDailyItems(){
   const toCell = otherAreas.length === 0
     ? `<span style="font-size:11px;color:var(--text-faint);">no other location</span>`
     : `<select data-daily-to="__ID__"><option value="">\u2014</option>${otherAreas.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}</select>`;
-  wrap.innerHTML = areaItems.map(i => `
+  // Balance shown/validated here is the balance as of the START of the selected date \u2014 i.e. backing
+  // out anything logged on or after that date (including later-dated entries already saved, e.g. a
+  // transfer credited on a later date than the one you're currently backfilling). Without this, a
+  // later-dated transfer that already landed would inflate the balance shown while catching up on an
+  // earlier date, and let Out/Transfer be entered against stock that, as of that earlier date, wasn't
+  // actually there yet.
+  wrap.innerHTML = areaItems.map(i => {
+    const baseBalance = dayStartTs !== null ? balanceAsOf(i, dayStartTs - 1) : i.qty;
+    return `
     <tr>
       <td class="colname">${escapeHtml(i.name)}${alreadyLoggedLabel(i)}</td>
-      <td class="colnum" style="font-family:var(--mono);font-size:12px;color:var(--text-dim);">${fmt(i.qty)} ${escapeHtml(i.unit)}</td>
+      <td class="colnum" style="font-family:var(--mono);font-size:12px;color:var(--text-dim);">${fmt(baseBalance)} ${escapeHtml(i.unit)}</td>
       <td class="colin">
         <input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-in="${i.id}">
         <input type="text" data-daily-in-source="${i.id}" placeholder="${escapeHtml(i.supplier || 'source / location')}">
       </td>
-      <td class="colnum"><input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-out="${i.id}" data-max="${i.qty}"></td>
+      <td class="colnum"><input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-out="${i.id}" data-max="${baseBalance}"></td>
       <td class="colnum"><input type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" data-daily-transfer="${i.id}"></td>
       <td class="colloc">${toCell.replace('__ID__', i.id)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function checkDailyDuplicate(){
@@ -3546,6 +3555,13 @@ document.getElementById('btnConfirmDaily').addEventListener('click', async ()=>{
   const note = document.getElementById('dailyNote').value.trim();
   const source = document.getElementById('dailySource').value.trim();
   const btn = document.getElementById('btnConfirmDaily');
+  // Validate against the balance as of the START of the selected date (backing out anything
+  // logged on or after it), not the item's live current qty — otherwise a later-dated entry
+  // that's already landed (e.g. catching up on an earlier day after a transfer posted on a
+  // later one) would let Out/Transfer be entered against stock that wasn't there yet as of
+  // the date being backfilled.
+  const dailyDateStr = document.getElementById('dailyDate').value;
+  const dailyDayStartTs = dailyDateStr ? new Date(dailyDateStr + 'T00:00:00').getTime() : null;
 
   const inRows = Array.from(document.querySelectorAll('#dailyItems [data-daily-in]'));
   const problems = [];
@@ -3582,9 +3598,10 @@ document.getElementById('btnConfirmDaily').addEventListener('click', async ()=>{
       problems.push(`"${item.name}": pick a destination for the transfer.`);
       return;
     }
-    const availableAfterInOut = Math.round((item.qty + inQty - outQty) * 100) / 100;
-    if(outQty > Math.round((item.qty + inQty) * 100) / 100){
-      problems.push(`"${item.name}": Out (${fmt(outQty)}) can't exceed balance + in (${fmt(Math.round((item.qty + inQty) * 100) / 100)}).`);
+    const baseBalance = dailyDayStartTs !== null ? balanceAsOf(item, dailyDayStartTs - 1) : item.qty;
+    const availableAfterInOut = Math.round((baseBalance + inQty - outQty) * 100) / 100;
+    if(outQty > Math.round((baseBalance + inQty) * 100) / 100){
+      problems.push(`"${item.name}": Out (${fmt(outQty)}) can't exceed balance + in (${fmt(Math.round((baseBalance + inQty) * 100) / 100)}).`);
       return;
     }
     if(transferQty > availableAfterInOut){
