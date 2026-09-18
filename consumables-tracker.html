@@ -316,6 +316,7 @@
     body.printing-restock .usage-table th, body.printing-restock .usage-table td{font-size:10px;padding:5px 6px;}
     body.printing-restock .restock-onscreen-only{display:none !important;}
     body.printing-restock .restock-print-only{display:table !important;}
+    body.printing-restock .restock-print-only-heading{display:block !important;font-weight:600;margin:16px 0 6px;font-size:12px;}
     body.printing-restock .summary-table th, body.printing-restock .summary-table td{font-size:10px;padding:5px 6px;}
     body.printing-monthly .hdr, body.printing-monthly .toolbar, body.printing-monthly .area-tabs,
     body.printing-monthly #list, body.printing-monthly #emptyState,
@@ -2050,6 +2051,16 @@ function renderRestockReport(){
               <td class="num">${fmt(e.qty)} ${escapeHtml(e.unit)}</td>
             </tr>`;
           }).join('')}
+        </tbody>
+      </table>
+      <div class="restock-print-only-heading" style="display:none;">Total restocked by item${restockFilterFrom || restockFilterTo ? ' (selected period)' : ''}</div>
+      <table class="summary-table restock-print-only" style="display:none;">
+        <thead><tr>
+          <th>Name / code</th>
+          <th style="text-align:right;">Total restocked</th>
+        </tr></thead>
+        <tbody>
+          ${totals.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${fmt(r.total)} ${escapeHtml(r.unit)}</td></tr>`).join('')}
         </tbody>
       </table>
       <div class="restock-onscreen-only">
@@ -4292,4 +4303,4 @@ document.getElementById('list').addEventListener('change', (e)=>{
 // load() is now triggered by the auth flow above once a session is confirmed.
 </script>
 </body>
-</html>
+</html>"add per item total on printed report od restock report"
