@@ -271,19 +271,41 @@ function entryOnDate(itemId, areaId, dateStr){
   return arr.find(e => e.entry_date === dateStr) || null;
 }
 
+// PostgREST caps an unpaginated select at (usually) 1000 rows. The ledger
+// table grows without bound, so a single .select() silently drops every row
+// past the cap — ordered by entry_date ascending, that means the MOST RECENT
+// days vanish first. Page through with .range() until a page comes back
+// short, so every row loads regardless of table size.
+async function fetchAllLedgerRows_(){
+  const pageSize = 1000;
+  let from = 0;
+  let all = [];
+  while(true){
+    const res = await sb.from('daily_ledger_entries')
+      .select('id,item_id,area_id,entry_date,balance,in_qty,source_code,out_qty,write_off_qty,write_off_reason,transfer_qty,transfer_to_code,sync_status,edited_by,edited_at')
+      .order('entry_date', { ascending:true })
+      .range(from, from + pageSize - 1);
+    if(res.error) throw res.error;
+    const rows = res.data || [];
+    all = all.concat(rows);
+    if(rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 async function loadAll(){
-  const [areasRes, suppliersRes, itemsRes, itemAreasRes, ledgerRes] = await Promise.all([
+  const [areasRes, suppliersRes, itemsRes, itemAreasRes, ledgerRows] = await Promise.all([
     sb.from('areas').select('*').order('code'),
     sb.from('suppliers').select('*').order('code'),
     sb.from('items').select('*').eq('is_active', true).order('name'),
     sb.from('item_areas').select('*'),
-    sb.from('daily_ledger_entries').select('id,item_id,area_id,entry_date,balance,in_qty,source_code,out_qty,write_off_qty,write_off_reason,transfer_qty,transfer_to_code,sync_status,edited_by,edited_at').order('entry_date', { ascending:true }),
+    fetchAllLedgerRows_(),
   ]);
   if(areasRes.error) throw areasRes.error;
   if(suppliersRes.error) throw suppliersRes.error;
   if(itemsRes.error) throw itemsRes.error;
   if(itemAreasRes.error) throw itemAreasRes.error;
-  if(ledgerRes.error) throw ledgerRes.error;
 
   areas = areasRes.data;
   suppliers = suppliersRes.data;
@@ -295,7 +317,7 @@ async function loadAll(){
   items = (itemsRes.data||[]).map(i => ({...i, areaIds: areaSetByItem[i.id] || new Set()}));
 
   ledgerByKey = {};
-  allLedgerFlat = ledgerRes.data || [];
+  allLedgerFlat = ledgerRows || [];
   allLedgerFlat.forEach(e => {
     const k = ledgerKey(e.item_id, e.area_id);
     (ledgerByKey[k] = ledgerByKey[k] || []).push(e);
