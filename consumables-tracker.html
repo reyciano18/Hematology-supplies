@@ -105,6 +105,15 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   .filter-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;}
   .filter-row label{font-size:11px;color:var(--text-dim);display:flex;flex-direction:column;gap:4px;}
+  .grid-table{font-size:12px;}
+  .grid-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-faint);padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  .grid-table td{padding:3px 4px;border-bottom:1px solid var(--line-soft);}
+  .grid-table input,.grid-table select{padding:5px 6px;font-size:12px;min-width:64px;}
+  .grid-table input[type=number]{width:64px;}
+  .grid-table tr.dirty td{background:var(--warn-dim);}
+  .grid-table .gbal{font-family:var(--mono);color:var(--text-dim);white-space:nowrap;}
+  .grid-table .grow-save{padding:5px 9px;font-size:11px;}
+  .grid-table .item-name{white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;}
   .checkbox-row{display:flex;gap:12px;flex-wrap:wrap;}
   .checkbox-row label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-dim);text-transform:none;letter-spacing:0;}
   .checkbox-row input{width:auto;}
@@ -183,6 +192,7 @@
       <button id="btnItems"><i class="ti ti-list-details" aria-hidden="true"></i>Items</button>
       <button id="btnDisposal"><i class="ti ti-recycle" aria-hidden="true"></i>Disposal report</button>
       <button id="btnReports"><i class="ti ti-report" aria-hidden="true"></i>Reports</button>
+      <button id="btnGrid"><i class="ti ti-table" aria-hidden="true"></i>Daily grid</button>
       <button class="ghost" id="btnLogout"><i class="ti ti-logout" aria-hidden="true"></i>Log out</button>
     </div>
   </div>
@@ -203,6 +213,7 @@
   <div class="panel" id="itemsPanel" style="display:none;"></div>
   <div class="panel" id="disposalPanel" style="display:none;"></div>
   <div class="panel" id="reportsPanel" style="display:none;"></div>
+  <div class="panel" id="gridPanel" style="display:none;"></div>
 
   <div id="list"></div>
   <div class="empty" id="emptyState" style="display:none;"><i class="ti ti-package" aria-hidden="true"></i>No items in this area yet.</div>
@@ -248,15 +259,31 @@ function showToast(msg){
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmt(n){ if(n==null) return '0'; const r=Math.round(n*100)/100; return Number.isInteger(r) ? r.toString() : r.toFixed(2); }
 function todayISO(){ const d=new Date(); const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
+function addDaysISO(dateStr, delta){
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + delta);
+  const tz = d.getTimezoneOffset()*60000;
+  return new Date(d.getTime()-tz).toISOString().slice(0,10);
+}
 
 // ---- global state ----
 let areas = [];       // [{id,code,name}]
 let suppliers = [];   // [{id,code,name}]
 let items = [];       // [{id,name,unit_of_measure,is_consumable,default_supplier_id,reorder_threshold,is_active,areaIds:Set}]
 let ledgerByKey = {};  // `${item_id}|${area_id}` -> [entries sorted by entry_date asc]
-let allLedgerFlat = []; // every daily_ledger_entries row, flat, for reports
+let allLedgerFlat = []; // every daily_ledger_entries row currently loaded, flat, for reports
 let activeAreaCode = null;
 let viewDate = todayISO();
+
+// The ledger grows by roughly (items x areas) rows every single day forever,
+// so loading the WHOLE table on every page load doesn't scale — it's fine
+// today, but would make the app progressively slower to open every month as
+// history piles up. Instead we keep a rolling window of recent days loaded
+// by default (plenty for daily use, dashboard, and search), and only reach
+// further back into history on demand when a report's date filter actually
+// asks for it. ledgerLoadedFrom tracks the earliest date currently in memory.
+const LEDGER_WINDOW_DAYS = 400; // ~13 months of daily use, loaded by default
+let ledgerLoadedFrom = null;
 
 function ledgerKey(itemId, areaId){ return itemId+'|'+areaId; }
 function entriesFor(itemId, areaId){ return ledgerByKey[ledgerKey(itemId, areaId)] || []; }
@@ -271,20 +298,22 @@ function entryOnDate(itemId, areaId, dateStr){
   return arr.find(e => e.entry_date === dateStr) || null;
 }
 
-// PostgREST caps an unpaginated select at (usually) 1000 rows. The ledger
-// table grows without bound, so a single .select() silently drops every row
-// past the cap — ordered by entry_date ascending, that means the MOST RECENT
-// days vanish first. Page through with .range() until a page comes back
-// short, so every row loads regardless of table size.
-async function fetchAllLedgerRows_(){
+// PostgREST caps an unpaginated select at (usually) 1000 rows. Page through
+// with .range() until a page comes back short, so every row in the
+// requested range loads regardless of how many rows match. fromDate is
+// optional — omit it to fetch everything from the beginning (used only when
+// explicitly expanding the loaded window further back).
+async function fetchLedgerRowsInRange_(fromDate, toDate){
   const pageSize = 1000;
   let from = 0;
   let all = [];
   while(true){
-    const res = await sb.from('daily_ledger_entries')
+    let q = sb.from('daily_ledger_entries')
       .select('id,item_id,area_id,entry_date,balance,in_qty,source_code,out_qty,write_off_qty,write_off_reason,transfer_qty,transfer_to_code,sync_status,edited_by,edited_at')
-      .order('entry_date', { ascending:true })
-      .range(from, from + pageSize - 1);
+      .order('entry_date', { ascending:true });
+    if(fromDate) q = q.gte('entry_date', fromDate);
+    if(toDate) q = q.lte('entry_date', toDate);
+    const res = await q.range(from, from + pageSize - 1);
     if(res.error) throw res.error;
     const rows = res.data || [];
     all = all.concat(rows);
@@ -294,13 +323,51 @@ async function fetchAllLedgerRows_(){
   return all;
 }
 
+// Merge newly-fetched rows into the in-memory cache and rebuild the
+// per-item/area index, keeping each bucket sorted by entry_date (balanceAsOf
+// relies on that order). Dedupes by row id in case of any range overlap.
+function mergeLedgerRows_(rows){
+  if(!rows || rows.length === 0) return;
+  // Upsert by id: a re-fetched row (e.g. after a grid edit cascades new
+  // balances forward through later dates) must overwrite the stale cached
+  // copy, not be skipped because that id was already seen.
+  const byId = new Map(allLedgerFlat.map(e => [e.id, e]));
+  rows.forEach(r => byId.set(r.id, r));
+  allLedgerFlat = Array.from(byId.values());
+  ledgerByKey = {};
+  allLedgerFlat.forEach(e => {
+    const k = ledgerKey(e.item_id, e.area_id);
+    (ledgerByKey[k] = ledgerByKey[k] || []).push(e);
+  });
+  Object.values(ledgerByKey).forEach(arr => arr.sort((a,b) => a.entry_date.localeCompare(b.entry_date)));
+}
+
+// Widen the loaded window backward if a report asks for a date earlier than
+// what's currently in memory. Returns true if it actually fetched anything
+// (callers use that to show a brief loading state). No-op if the requested
+// date is already covered.
+async function ensureLedgerFrom(neededDate){
+  if(!neededDate) return false;
+  if(ledgerLoadedFrom && neededDate >= ledgerLoadedFrom) return false;
+  const toDate = ledgerLoadedFrom ? addDaysISO(ledgerLoadedFrom, -1) : null;
+  const rows = await fetchLedgerRowsInRange_(neededDate, toDate);
+  mergeLedgerRows_(rows);
+  ledgerLoadedFrom = neededDate;
+  return true;
+}
+
 async function loadAll(){
+  // Keep whatever window is already loaded (a report may have expanded it
+  // backward already) — never shrink coverage on a routine reload.
+  const defaultCutoff = addDaysISO(viewDate, -LEDGER_WINDOW_DAYS);
+  const cutoff = (ledgerLoadedFrom && ledgerLoadedFrom < defaultCutoff) ? ledgerLoadedFrom : defaultCutoff;
+
   const [areasRes, suppliersRes, itemsRes, itemAreasRes, ledgerRows] = await Promise.all([
     sb.from('areas').select('*').order('code'),
     sb.from('suppliers').select('*').order('code'),
     sb.from('items').select('*').eq('is_active', true).order('name'),
     sb.from('item_areas').select('*'),
-    fetchAllLedgerRows_(),
+    fetchLedgerRowsInRange_(cutoff, null),
   ]);
   if(areasRes.error) throw areasRes.error;
   if(suppliersRes.error) throw suppliersRes.error;
@@ -322,6 +389,8 @@ async function loadAll(){
     const k = ledgerKey(e.item_id, e.area_id);
     (ledgerByKey[k] = ledgerByKey[k] || []).push(e);
   });
+  Object.values(ledgerByKey).forEach(arr => arr.sort((a,b) => a.entry_date.localeCompare(b.entry_date)));
+  ledgerLoadedFrom = cutoff;
 
   if(!activeAreaCode && areas.length) activeAreaCode = areas[0].code;
 }
@@ -361,8 +430,9 @@ function refreshOpenPanels(){
   if(document.getElementById('searchPanel').style.display !== 'none') renderSearchResults();
 }
 
-document.getElementById('viewDate').addEventListener('change', (e)=>{
+document.getElementById('viewDate').addEventListener('change', async (e)=>{
   viewDate = e.target.value || todayISO();
+  await ensureLedgerFrom(viewDate); // in case they jump to a date older than the loaded window
   renderList();
   refreshOpenPanels();
 });
@@ -586,7 +656,7 @@ document.getElementById('app').addEventListener('click', async (e)=>{
 });
 
 // ---- Panel toggling (shared) ----
-const ALL_PANEL_IDS = ['dashboardPanel','searchPanel','lowStockPanel','expiringPanel','itemsPanel','disposalPanel','reportsPanel'];
+const ALL_PANEL_IDS = ['dashboardPanel','searchPanel','lowStockPanel','expiringPanel','itemsPanel','disposalPanel','reportsPanel','gridPanel'];
 function togglePanel(id, renderFn){
   const p = document.getElementById(id);
   const willOpen = p.style.display === 'none';
@@ -966,8 +1036,20 @@ function renderReportBody(){
   if(reportType === 'monthly') return renderMonthlyReport(body);
 }
 
+// Reports only keep a rolling window of ledger history in memory by
+// default (see LEDGER_WINDOW_DAYS) — this expands it backward on demand
+// when a report's own date filter reaches further back, showing a brief
+// loading placeholder only when a fetch actually happens.
+async function ensureReportRange_(body, neededDate){
+  if(!neededDate) return;
+  if(ledgerLoadedFrom && neededDate >= ledgerLoadedFrom) return; // already covered, no flicker
+  body.innerHTML = `<div class="empty">Loading history…</div>`;
+  await ensureLedgerFrom(neededDate);
+}
+
 // 1. Remaining balance — combined balance per item as of a chosen date, optionally filtered to one area.
-function renderBalanceReport(body){
+async function renderBalanceReport(body){
+  await ensureReportRange_(body, reportState.balanceDate || viewDate);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.balanceArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const sourceOpts = `<option value="">All sources</option>` + suppliers.map(s=>`<option value="${escapeHtml(s.code)}" ${reportState.balanceSource===s.code?'selected':''}>${escapeHtml(s.code)}</option>`).join('');
   const filterRow = `<div class="filter-row">
@@ -1006,7 +1088,8 @@ function renderBalanceReport(body){
 }
 
 // 2. Usage & received report — totals per item over a date range, split by movement kind, plus received-by-source.
-function renderActivityReport(body){
+async function renderActivityReport(body){
+  if(reportState.actFrom) await ensureReportRange_(body, reportState.actFrom);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.actArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const itemOpts = `<option value="">All items</option>` + items.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}" ${reportState.actItem===i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
   const filterRow = `<div class="filter-row">
@@ -1076,7 +1159,8 @@ function renderActivityReport(body){
 }
 
 // 3. Daily entry log — raw ledger rows for a date range, newest first.
-function renderDailyLogReport(body){
+async function renderDailyLogReport(body){
+  await ensureReportRange_(body, reportState.logFrom || viewDate);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.logArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const filterRow = `<div class="filter-row">
     <label>From<input type="date" id="logFrom" value="${reportState.logFrom}"></label>
@@ -1122,7 +1206,8 @@ function renderDailyLogReport(body){
 }
 
 // 4. Restock report — receipts from external suppliers only (internal transfers are excluded; see Usage & received for those).
-function renderRestockReport(body){
+async function renderRestockReport(body){
+  if(reportState.restockFrom) await ensureReportRange_(body, reportState.restockFrom);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.restockArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const itemOpts = `<option value="">All items</option>` + items.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}" ${reportState.restockItem===i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
   const sourceOpts = `<option value="">All sources</option>` + suppliers.map(s=>`<option value="${escapeHtml(s.code)}" ${reportState.restockSource===s.code?'selected':''}>${escapeHtml(s.code)}</option>`).join('');
@@ -1178,7 +1263,10 @@ function renderRestockReport(body){
 }
 
 // 5. Received / used / balance — opening balance, movement, closing balance per item+area over a date range.
-function renderRubReport(body){
+async function renderRubReport(body){
+  // opening balance looks *before* the From date, so that's the earliest date this report needs loaded
+  if(reportState.rubFrom) await ensureReportRange_(body, dayBefore(reportState.rubFrom));
+  else await ensureReportRange_(body, reportState.rubTo || viewDate);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.rubArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const filterRow = `<div class="filter-row">
     <label>From<input type="date" id="rubFrom" value="${reportState.rubFrom}"></label>
@@ -1223,9 +1311,10 @@ function renderRubReport(body){
 }
 
 // 6. Monthly reagent sheet — day-column matrix per item for one area and month, like the paper ledger.
-function renderMonthlyReport(body){
+async function renderMonthlyReport(body){
   if(!reportState.monthArea && areas.length) reportState.monthArea = areas.find(a=>a.code===activeAreaCode)?.id || areas[0].id;
   if(!reportState.month) reportState.month = viewDate.slice(0,7);
+  await ensureReportRange_(body, reportState.month + '-01');
   const areaOpts = areas.map(a=>`<option value="${a.id}" ${reportState.monthArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
   const filterRow = `<div class="filter-row">
     <label>Area<select id="moArea">${areaOpts}</select></label>
@@ -1267,6 +1356,143 @@ function renderMonthlyReport(body){
 
   document.getElementById('moArea').addEventListener('change', (e)=>{ reportState.monthArea = e.target.value; renderMonthlyReport(body); });
   document.getElementById('moMonth').addEventListener('change', (e)=>{ reportState.month = e.target.value; renderMonthlyReport(body); });
+}
+
+// ---- Daily grid: spreadsheet-style day entry, mirroring the old Sheet's day-column layout ----
+document.getElementById('btnGrid').addEventListener('click', ()=> togglePanel('gridPanel', renderGridPanel));
+
+let gridState = { date: null, areaCode: null };
+
+async function renderGridPanel(){
+  const p = document.getElementById('gridPanel');
+  if(!gridState.date) gridState.date = viewDate;
+  if(!gridState.areaCode) gridState.areaCode = activeAreaCode;
+
+  const needed = dayBefore(gridState.date); // need the prior day's balance as Start Bal
+  if(!ledgerLoadedFrom || needed < ledgerLoadedFrom){
+    p.innerHTML = `<div class="panel-head"><span class="panel-title"><i class="ti ti-table" aria-hidden="true" style="margin-right:6px;"></i>Daily grid</span><button class="panel-close" data-close>&times;</button></div><div class="empty">Loading history…</div>`;
+    await ensureLedgerFrom(needed);
+  }
+  renderGridTable();
+}
+
+function renderGridTable(){
+  const p = document.getElementById('gridPanel');
+  const area = areas.find(a => a.code === gridState.areaCode) || areas[0];
+  if(!area){ p.innerHTML = `<div class="empty">No areas found.</div>`; return; }
+  gridState.areaCode = area.code;
+
+  const head = `<div class="panel-head"><span class="panel-title"><i class="ti ti-table" aria-hidden="true" style="margin-right:6px;"></i>Daily grid</span><button class="panel-close" data-close>&times;</button></div>`;
+  const areaOpts = areas.map(a=>`<option value="${escapeHtml(a.code)}" ${a.code===area.code?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
+  const filterRow = `<div class="filter-row">
+    <label>Date<input type="date" id="gridDate" value="${gridState.date}"></label>
+    <label>Area<select id="gridArea">${areaOpts}</select></label>
+    <button class="small primary" id="gridSaveAll"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save changed rows</button>
+  </div>`;
+
+  const areaItems = items.filter(i => i.areaIds.has(area.id)).sort((a,b)=>a.name.localeCompare(b.name));
+  if(areaItems.length === 0){
+    p.innerHTML = head + filterRow + `<div class="empty">No items in this area.</div>`;
+    wireGridControls();
+    return;
+  }
+
+  const rows = areaItems.map(item => {
+    const startBal = balanceAsOf(item.id, area.id, dayBefore(gridState.date));
+    const e = entryOnDate(item.id, area.id, gridState.date);
+    const endBal = e ? e.balance : startBal;
+    return `<tr data-item="${item.id}" data-startbal="${startBal}">
+      <td class="item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</td>
+      <td class="gbal">${fmt(startBal)}</td>
+      <td><input type="number" step="0.01" min="0" data-f="in" value="${e && e.in_qty ? fmt(e.in_qty) : ''}"></td>
+      <td><select data-f="source">${sourceOptionsHtml(area.code, e ? e.source_code : '')}</select></td>
+      <td><input type="number" step="0.01" min="0" data-f="out" value="${e && e.out_qty ? fmt(e.out_qty) : ''}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="wo" value="${e && e.write_off_qty ? fmt(e.write_off_qty) : ''}"></td>
+      <td><select data-f="woreason"><option value="">—</option>${WRITE_OFF_REASONS.map(r=>`<option value="${r}" ${e && e.write_off_reason===r?'selected':''}>${r}</option>`).join('')}</select></td>
+      <td><input type="number" step="0.01" min="0" data-f="xfer" value="${e && e.transfer_qty ? fmt(e.transfer_qty) : ''}"></td>
+      <td><select data-f="xferto"><option value="">—</option>${destAreaOptionsHtml(area.code).replace(/<option value="([^"]*)"/g, (m,v)=> e && e.transfer_to_code===v ? `<option value="${v}" selected` : m)}</select></td>
+      <td class="gbal grow-end">${fmt(endBal)}</td>
+      <td><button class="small grow-save" data-act="save-row"><i class="ti ti-check" aria-hidden="true"></i></button></td>
+    </tr>`;
+  }).join('');
+
+  const table = `<div style="overflow-x:auto;"><table class="grid-table"><thead><tr>
+    <th>Item</th><th>Start Bal</th><th>In</th><th>Source</th><th>Out</th><th>W/O</th><th>W/O Reason</th><th>Xfer</th><th>Xfer To</th><th>End Bal</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div>`;
+
+  p.innerHTML = head + filterRow + table;
+  wireGridControls();
+  wireGridRows();
+}
+
+function wireGridControls(){
+  const p = document.getElementById('gridPanel');
+  p.querySelector('[data-close]').addEventListener('click', ()=>{ p.style.display='none'; });
+  const dateEl = document.getElementById('gridDate');
+  if(dateEl) dateEl.addEventListener('change', async (e)=>{
+    gridState.date = e.target.value || todayISO();
+    await renderGridPanel();
+  });
+  const areaEl = document.getElementById('gridArea');
+  if(areaEl) areaEl.addEventListener('change', (e)=>{ gridState.areaCode = e.target.value; renderGridTable(); });
+  const saveAllBtn = document.getElementById('gridSaveAll');
+  if(saveAllBtn) saveAllBtn.addEventListener('click', async ()=>{
+    const dirtyRows = Array.from(document.querySelectorAll('.grid-table tbody tr.dirty'));
+    for(const tr of dirtyRows){ await saveGridRow(tr); }
+  });
+}
+
+function wireGridRows(){
+  const tbody = document.querySelector('.grid-table tbody');
+  if(!tbody) return;
+  tbody.addEventListener('input', (e)=>{
+    const tr = e.target.closest('tr'); if(tr) tr.classList.add('dirty');
+  });
+  tbody.addEventListener('click', async (e)=>{
+    if(e.target.closest('[data-act="save-row"]')){
+      const tr = e.target.closest('tr');
+      await saveGridRow(tr);
+    }
+  });
+}
+
+async function saveGridRow(tr){
+  const area = areas.find(a => a.code === gridState.areaCode);
+  const item = items.find(i => i.id === tr.dataset.item);
+  if(!area || !item) return;
+  const get = f => tr.querySelector(`[data-f="${f}"]`)?.value?.trim() || '';
+  const num = v => v === '' ? 0 : parseFloat(v);
+
+  const inQty = num(get('in')), outQty = num(get('out')), woQty = num(get('wo')), xferQty = num(get('xfer'));
+  const source = get('source'), woReason = get('woreason'), xferTo = get('xferto');
+
+  if(inQty > 0 && !source){ showToast('Choose a source for the In quantity.'); return; }
+  if(woQty > 0 && !woReason){ showToast('Choose a W/O reason.'); return; }
+  if(xferQty > 0 && !xferTo){ showToast('Choose a Xfer To area.'); return; }
+
+  try{
+    await callLedgerAction({
+      action: 'grid_set', area_code: area.code, item_name: item.name, entry_date: gridState.date,
+      in_qty: inQty, source_code: source || undefined,
+      out_qty: outQty,
+      write_off_qty: woQty, write_off_reason: woReason || undefined,
+      transfer_qty: xferQty, transfer_to_code: xferTo || undefined,
+    });
+    // Pull this item's rows back across ALL areas from the saved date forward:
+    // the server may have recomputed later-date balances on this area (a cascading
+    // edit) and, for a transfer, also updated the destination (and possibly an
+    // old destination it un-linked from) — refresh everything that could have moved.
+    const fresh = await fetchLedgerRowsInRange_(gridState.date, null);
+    mergeLedgerRows_(fresh.filter(r => r.item_id === item.id));
+    tr.classList.remove('dirty');
+    tr.querySelector('.grow-end').textContent = fmt(entryOnDate(item.id, area.id, gridState.date)?.balance ?? 0);
+    tr.querySelector('.gbal').textContent = fmt(balanceAsOf(item.id, area.id, dayBefore(gridState.date)));
+    showToast(`Saved ${item.name}`);
+    renderList();
+    refreshOpenPanels();
+  }catch(err){
+    showToast('Save failed: ' + (err.message || String(err)));
+  }
 }
 </script>
 </body>
