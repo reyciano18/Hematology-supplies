@@ -996,8 +996,7 @@ function dayBefore(dateStr){
 let reportType = 'balance';
 let reportState = {
   balanceDate: viewDate, balanceArea: '', balanceSource: '',
-  actFrom: '', actTo: '', actArea: '', actItem: '',
-  logFrom: viewDate, logTo: viewDate, logArea: '',
+  logFrom: viewDate, logTo: viewDate, logArea: '', logItem: '',
   restockFrom: '', restockTo: '', restockArea: '', restockItem: '', restockSource: '',
   rubFrom: '', rubTo: '', rubArea: '',
   monthArea: '', month: '',
@@ -1008,7 +1007,6 @@ function supplierCodeOfItem(item){
 
 const REPORT_LABELS = {
   balance: 'Remaining balance',
-  activity: 'Usage & received report',
   dailylog: 'Daily entry log',
   restock: 'Restock report',
   rub: 'Received / used / balance',
@@ -1047,7 +1045,6 @@ function renderReportBody(){
   const body = document.getElementById('reportBody');
   if(!body) return;
   if(reportType === 'balance') return renderBalanceReport(body);
-  if(reportType === 'activity') return renderActivityReport(body);
   if(reportType === 'dailylog') return renderDailyLogReport(body);
   if(reportType === 'restock') return renderRestockReport(body);
   if(reportType === 'rub') return renderRubReport(body);
@@ -1105,85 +1102,16 @@ async function renderBalanceReport(body){
   document.getElementById('rbSource').addEventListener('change', (e)=>{ reportState.balanceSource = e.target.value; renderBalanceReport(body); });
 }
 
-// 2. Usage & received report — totals per item over a date range, split by movement kind, plus received-by-source.
-async function renderActivityReport(body){
-  if(reportState.actFrom) await ensureReportRange_(body, reportState.actFrom);
-  const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.actArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
-  const itemOpts = `<option value="">All items</option>` + items.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}" ${reportState.actItem===i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
-  const filterRow = `<div class="filter-row">
-    <label>From<input type="date" id="actFrom" value="${reportState.actFrom}"></label>
-    <label>To<input type="date" id="actTo" value="${reportState.actTo}"></label>
-    <label>Area<select id="actArea">${areaOpts}</select></label>
-    <label>Item<select id="actItem">${itemOpts}</select></label>
-  </div>`;
-
-  const supCodes = supplierCodeSet();
-  const inameById = itemNameById(), unitById = itemUnitById();
-  const entries = allLedgerFlat.filter(e =>
-    (!reportState.actFrom || e.entry_date >= reportState.actFrom) &&
-    (!reportState.actTo || e.entry_date <= reportState.actTo) &&
-    (!reportState.actArea || e.area_id === reportState.actArea) &&
-    (!reportState.actItem || e.item_id === reportState.actItem)
-  );
-
-  const byItem = {};
-  const bySource = {};
-  entries.forEach(e => {
-    const key = e.item_id;
-    if(!byItem[key]) byItem[key] = { received:0, transferIn:0, used:0, writeoff:0, transferOut:0 };
-    const r = byItem[key];
-    if(e.in_qty){
-      if(e.source_code && supCodes.has(e.source_code)){
-        r.received = Math.round((r.received + Number(e.in_qty))*100)/100;
-        if(!bySource[e.source_code]) bySource[e.source_code] = 0;
-        bySource[e.source_code] = Math.round((bySource[e.source_code] + Number(e.in_qty))*100)/100;
-      }else{
-        r.transferIn = Math.round((r.transferIn + Number(e.in_qty))*100)/100;
-      }
-    }
-    if(e.out_qty) r.used = Math.round((r.used + Number(e.out_qty))*100)/100;
-    if(e.write_off_qty) r.writeoff = Math.round((r.writeoff + Number(e.write_off_qty))*100)/100;
-    if(e.transfer_qty) r.transferOut = Math.round((r.transferOut + Number(e.transfer_qty))*100)/100;
-  });
-
-  const rows = Object.entries(byItem).map(([itemId, r]) => ({ itemId, name: inameById[itemId]||itemId, unit: unitById[itemId]||'', ...r }))
-    .sort((a,b)=>a.name.localeCompare(b.name));
-
-  const mainTable = rows.length === 0 ? `<div class="empty">No activity in this range.</div>` : `<table><thead><tr>
-      <th>Item</th><th class="num">Received</th><th class="num">Transfer in</th><th class="num">Used</th><th class="num">Write-off</th><th class="num">Transfer out</th>
-    </tr></thead><tbody>
-      ${rows.map(r => `<tr>
-        <td>${escapeHtml(r.name)}</td>
-        <td class="num">${fmt(r.received)} ${escapeHtml(r.unit)}</td>
-        <td class="num">${fmt(r.transferIn)} ${escapeHtml(r.unit)}</td>
-        <td class="num">${fmt(r.used)} ${escapeHtml(r.unit)}</td>
-        <td class="num">${fmt(r.writeoff)} ${escapeHtml(r.unit)}</td>
-        <td class="num">${fmt(r.transferOut)} ${escapeHtml(r.unit)}</td>
-      </tr>`).join('')}
-    </tbody></table>`;
-
-  const sourceRows = Object.entries(bySource).sort((a,b)=>b[1]-a[1]);
-  const sourceTable = sourceRows.length === 0 ? '' : `<div style="font-size:12px;color:var(--text-dim);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.4px;">Received by supplier</div>
-    <table><thead><tr><th>Supplier</th><th class="num">Total received</th></tr></thead><tbody>
-      ${sourceRows.map(([code,total]) => `<tr><td>${escapeHtml(code)}</td><td class="num">${fmt(total)}</td></tr>`).join('')}
-    </tbody></table>`;
-
-  setPrintHead(`${reportState.actFrom||'earliest'} – ${reportState.actTo||'latest'}${reportState.actArea ? ' · Area: '+areaCodeById()[reportState.actArea] : ''}${reportState.actItem ? ' · Item: '+inameById[reportState.actItem] : ''}`);
-  body.innerHTML = filterRow + mainTable + sourceTable;
-  document.getElementById('actFrom').addEventListener('change', (e)=>{ reportState.actFrom = e.target.value; renderActivityReport(body); });
-  document.getElementById('actTo').addEventListener('change', (e)=>{ reportState.actTo = e.target.value; renderActivityReport(body); });
-  document.getElementById('actArea').addEventListener('change', (e)=>{ reportState.actArea = e.target.value; renderActivityReport(body); });
-  document.getElementById('actItem').addEventListener('change', (e)=>{ reportState.actItem = e.target.value; renderActivityReport(body); });
-}
-
 // 3. Daily entry log — raw ledger rows for a date range, newest first.
 async function renderDailyLogReport(body){
   await ensureReportRange_(body, reportState.logFrom || viewDate);
   const areaOpts = `<option value="">All areas</option>` + areas.map(a=>`<option value="${a.id}" ${reportState.logArea===a.id?'selected':''}>${escapeHtml(a.code)}</option>`).join('');
+  const itemOpts = `<option value="">All items</option>` + items.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}" ${reportState.logItem===i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
   const filterRow = `<div class="filter-row">
     <label>From<input type="date" id="logFrom" value="${reportState.logFrom}"></label>
     <label>To<input type="date" id="logTo" value="${reportState.logTo}"></label>
     <label>Area<select id="logArea">${areaOpts}</select></label>
+    <label>Item<select id="logItem">${itemOpts}</select></label>
   </div>`;
 
   const inameById = itemNameById(), acodeById = areaCodeById();
@@ -1191,6 +1119,7 @@ async function renderDailyLogReport(body){
     (!reportState.logFrom || e.entry_date >= reportState.logFrom) &&
     (!reportState.logTo || e.entry_date <= reportState.logTo) &&
     (!reportState.logArea || e.area_id === reportState.logArea) &&
+    (!reportState.logItem || e.item_id === reportState.logItem) &&
     (e.in_qty || e.out_qty || e.write_off_qty || e.transfer_qty)
   ).sort((a,b) => b.entry_date.localeCompare(a.entry_date) || (inameById[a.item_id]||'').localeCompare(inameById[b.item_id]||''));
   const truncated = rows.length > 500;
@@ -1216,11 +1145,12 @@ async function renderDailyLogReport(body){
       </tr>`).join('')}
     </tbody></table>${truncated ? `<div style="font-size:11px;color:var(--text-faint);margin-top:8px;">Showing the most recent 500 rows — narrow the date range to see the rest.</div>` : ''}`;
 
-  setPrintHead(`${reportState.logFrom||'earliest'} – ${reportState.logTo||'latest'}${reportState.logArea ? ' · Area: '+acodeById[reportState.logArea] : ''}`);
+  setPrintHead(`${reportState.logFrom||'earliest'} – ${reportState.logTo||'latest'}${reportState.logArea ? ' · Area: '+acodeById[reportState.logArea] : ''}${reportState.logItem ? ' · Item: '+inameById[reportState.logItem] : ''}`);
   body.innerHTML = filterRow + table;
   document.getElementById('logFrom').addEventListener('change', (e)=>{ reportState.logFrom = e.target.value; renderDailyLogReport(body); });
   document.getElementById('logTo').addEventListener('change', (e)=>{ reportState.logTo = e.target.value; renderDailyLogReport(body); });
   document.getElementById('logArea').addEventListener('change', (e)=>{ reportState.logArea = e.target.value; renderDailyLogReport(body); });
+  document.getElementById('logItem').addEventListener('change', (e)=>{ reportState.logItem = e.target.value; renderDailyLogReport(body); });
 }
 
 // 4. Restock report — receipts from external suppliers only (internal transfers are excluded; see Usage & received for those).
@@ -1236,7 +1166,7 @@ async function renderRestockReport(body){
     <label>Item<select id="rsItem">${itemOpts}</select></label>
     <label>Source<select id="rsSource">${sourceOpts}</select></label>
   </div>
-  <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">Receipts from suppliers only — internal area-to-area transfers show under Usage &amp; received as "Transfer in".</div>`;
+  <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">Receipts from suppliers only — internal area-to-area transfers show under Received / used / balance as "Transfer In".</div>`;
 
   const supCodes = supplierCodeSet();
   const inameById = itemNameById(), unitById = itemUnitById(), acodeById = areaCodeById();
@@ -1249,29 +1179,39 @@ async function renderRestockReport(body){
     (!reportState.restockSource || e.source_code === reportState.restockSource)
   );
 
-  const byItem = {};
-  entries.forEach(e => {
-    if(!byItem[e.item_id]) byItem[e.item_id] = { total:0, bySource:{}, byArea:{} };
-    const r = byItem[e.item_id];
-    r.total = Math.round((r.total + Number(e.in_qty))*100)/100;
-    r.bySource[e.source_code] = Math.round(((r.bySource[e.source_code]||0) + Number(e.in_qty))*100)/100;
-    const ac = acodeById[e.area_id];
-    r.byArea[ac] = Math.round(((r.byArea[ac]||0) + Number(e.in_qty))*100)/100;
+  const rows = entries.slice().sort((a,b) =>
+    b.entry_date.localeCompare(a.entry_date) ||
+    (inameById[a.item_id]||'').localeCompare(inameById[b.item_id]||'')
+  );
+
+  const totalsByItem = {};
+  rows.forEach(e => {
+    if(!totalsByItem[e.item_id]) totalsByItem[e.item_id] = { name: inameById[e.item_id]||e.item_id, unit: unitById[e.item_id]||'', qty: 0 };
+    totalsByItem[e.item_id].qty = Math.round((totalsByItem[e.item_id].qty + Number(e.in_qty||0))*100)/100;
   });
-  const rows = Object.entries(byItem).map(([id,r]) => ({ id, name: inameById[id]||id, unit: unitById[id]||'', ...r })).sort((a,b)=>b.total-a.total);
+  const itemTotals = Object.values(totalsByItem).sort((a,b)=>a.name.localeCompare(b.name));
 
   const table = rows.length === 0 ? `<div class="empty">No restocks in this range.</div>` : `<table><thead><tr>
-      <th>Item</th><th>By area</th><th>By supplier</th><th class="num">Total received</th>
+      <th>Date</th><th>Item</th><th>Area</th><th>Supplier</th><th class="num">Qty</th><th>By</th>
     </tr></thead><tbody>
-      ${rows.map(r => `<tr>
-        <td>${escapeHtml(r.name)}</td>
-        <td class="breakdown">${Object.entries(r.byArea).map(([a,q])=>`${escapeHtml(a)}: ${fmt(q)}`).join(' · ')}</td>
-        <td class="breakdown">${Object.entries(r.bySource).map(([s,q])=>`${escapeHtml(s)}: ${fmt(q)}`).join(' · ')}</td>
-        <td class="num">${fmt(r.total)} ${escapeHtml(r.unit)}</td>
+      ${rows.map(e => `<tr>
+        <td>${escapeHtml(e.entry_date)}</td>
+        <td>${escapeHtml(inameById[e.item_id]||'')}</td>
+        <td>${escapeHtml(acodeById[e.area_id]||'')}</td>
+        <td>${escapeHtml(e.source_code||'—')}</td>
+        <td class="num">${fmt(e.in_qty)} ${escapeHtml(unitById[e.item_id]||'')}</td>
+        <td>${escapeHtml(e.edited_by||'—')}</td>
       </tr>`).join('')}
-    </tbody></table>`;
+    </tbody></table>
+    <div style="font-size:11px;color:var(--text-faint);margin-top:8px;">${rows.length} entr${rows.length===1?'y':'ies'}</div>
+    ${itemTotals.length ? `<div style="margin-top:14px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px;">Total restocked</div>
+      <table><thead><tr><th>Item</th><th class="num">Total received</th></tr></thead><tbody>
+        ${itemTotals.map(t => `<tr><td>${escapeHtml(t.name)}</td><td class="num">${fmt(t.qty)} ${escapeHtml(t.unit)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>` : ''}`;
 
-  setPrintHead(`${reportState.restockFrom||'earliest'} – ${reportState.restockTo||'latest'}${reportState.restockArea ? ' · Area: '+areaCodeById()[reportState.restockArea] : ''}${reportState.restockSource ? ' · Source: '+reportState.restockSource : ''}`);
+  setPrintHead(`${reportState.restockFrom||'earliest'} – ${reportState.restockTo||'latest'}${reportState.restockArea ? ' · Area: '+areaCodeById()[reportState.restockArea] : ''}${reportState.restockItem ? ' · Item: '+inameById[reportState.restockItem] : ''}${reportState.restockSource ? ' · Source: '+reportState.restockSource : ''}`);
   body.innerHTML = filterRow + table;
   document.getElementById('rsFrom').addEventListener('change', (e)=>{ reportState.restockFrom = e.target.value; renderRestockReport(body); });
   document.getElementById('rsTo').addEventListener('change', (e)=>{ reportState.restockTo = e.target.value; renderRestockReport(body); });
@@ -1293,6 +1233,7 @@ async function renderRubReport(body){
   </div>`;
 
   const from = reportState.rubFrom, to = reportState.rubTo || viewDate;
+  const areaCodeSet = new Set(areas.map(a=>a.code));
   const rows = [];
   items.forEach(item => {
     const areaIds = reportState.rubArea ? [reportState.rubArea].filter(id => item.areaIds.has(id)) : Array.from(item.areaIds);
@@ -1300,25 +1241,92 @@ async function renderRubReport(body){
       const opening = from ? balanceAsOf(item.id, aid, dayBefore(from)) : 0;
       const closing = balanceAsOf(item.id, aid, to);
       const entries = entriesFor(item.id, aid).filter(e => (!from || e.entry_date >= from) && e.entry_date <= to);
-      let received=0, used=0;
-      entries.forEach(e => { received = Math.round((received+Number(e.in_qty||0))*100)/100; used = Math.round((used+Number(e.out_qty||0))*100)/100; });
       if(entries.length === 0 && !from) return; // nothing to show with no range and no activity
-      rows.push({ item, areaCode: areaCodeById()[aid], opening, received, used, closing });
+
+      // Received (from a supplier) and Transfer In (from another area) both
+      // land in the same in_qty/source_code fields -- split them by whether
+      // the source is a real area code, and keep a per-source breakdown for
+      // each so "indicating source"/"indicating destination" is visible.
+      const receivedBySource = {}, transferInBySource = {}, transferOutByDest = {}, writeOffByReason = {};
+      let used = 0;
+      entries.forEach(e => {
+        const inQty = Number(e.in_qty||0);
+        if(inQty){
+          const bucket = areaCodeSet.has(e.source_code) ? transferInBySource : receivedBySource;
+          const key = e.source_code || '—';
+          bucket[key] = Math.round(((bucket[key]||0) + inQty)*100)/100;
+        }
+        used = Math.round((used + Number(e.out_qty||0))*100)/100;
+        const xferQty = Number(e.transfer_qty||0);
+        if(xferQty){
+          const key = e.transfer_to_code || '—';
+          transferOutByDest[key] = Math.round(((transferOutByDest[key]||0) + xferQty)*100)/100;
+        }
+        const woQty = Number(e.write_off_qty||0);
+        if(woQty){
+          const key = e.write_off_reason || '—';
+          writeOffByReason[key] = Math.round(((writeOffByReason[key]||0) + woQty)*100)/100;
+        }
+      });
+      const sumVals = obj => Object.values(obj).reduce((a,b)=>a+b, 0);
+      rows.push({
+        item, areaCode: areaCodeById()[aid], opening, closing, used,
+        received: sumVals(receivedBySource), receivedBySource,
+        transferIn: sumVals(transferInBySource), transferInBySource,
+        transferOut: sumVals(transferOutByDest), transferOutByDest,
+        writeOff: sumVals(writeOffByReason), writeOffByReason,
+      });
     });
   });
   rows.sort((a,b)=> a.item.name.localeCompare(b.item.name) || a.areaCode.localeCompare(b.areaCode));
 
-  const table = rows.length === 0 ? `<div class="empty">Pick a date range to see this report.</div>` : `<table><thead><tr>
-      <th>Item</th><th>Area</th><th class="num">Opening</th><th class="num">Received</th><th class="num">Used</th><th class="num">Closing</th>
+  // Group by item: an item-level totals row, followed by one indented row
+  // per area it appears in (skipped when there's only one area, since the
+  // total and the single area row would just repeat each other).
+  const groups = [];
+  const byItemId = new Map();
+  rows.forEach(r => {
+    if(!byItemId.has(r.item.id)){ const g = { item: r.item, areaRows: [] }; byItemId.set(r.item.id, g); groups.push(g); }
+    byItemId.get(r.item.id).areaRows.push(r);
+  });
+  const mergeBy = (rows, key) => {
+    const out = {};
+    rows.forEach(r => Object.entries(r[key]).forEach(([k,v])=>{ out[k] = Math.round(((out[k]||0)+v)*100)/100; }));
+    return out;
+  };
+  const sumField = (rows, key) => Math.round(rows.reduce((a,r)=>a+Number(r[key]||0), 0)*100)/100;
+
+  const breakdown = obj => Object.entries(obj).map(([k,v])=>`${escapeHtml(k)}: ${fmt(v)}`).join(', ');
+  const cell = (total, unit, bySource) => `${fmt(total)} ${escapeHtml(unit||'')}` +
+    (total && bySource ? `<div class="breakdown" style="font-size:10px;color:var(--text-faint);">${breakdown(bySource)}</div>` : '');
+
+  const table = groups.length === 0 ? `<div class="empty">Pick a date range to see this report.</div>` : `<table><thead><tr>
+      <th>Item</th><th class="num">Opening</th><th class="num">Received</th><th class="num">Transfer In</th><th class="num">Used</th><th class="num">Write-off</th><th class="num">Transfer Out</th><th class="num">Closing</th>
     </tr></thead><tbody>
-      ${rows.map(r => `<tr>
-        <td>${escapeHtml(r.item.name)}</td>
-        <td>${escapeHtml(r.areaCode)}</td>
-        <td class="num">${fmt(r.opening)} ${escapeHtml(r.item.unit_of_measure||'')}</td>
-        <td class="num">${fmt(r.received)} ${escapeHtml(r.item.unit_of_measure||'')}</td>
-        <td class="num">${fmt(r.used)} ${escapeHtml(r.item.unit_of_measure||'')}</td>
-        <td class="num">${fmt(r.closing)} ${escapeHtml(r.item.unit_of_measure||'')}</td>
-      </tr>`).join('')}
+      ${groups.map(g => {
+        const unit = g.item.unit_of_measure;
+        const totalRow = `<tr style="font-weight:600;">
+          <td>${escapeHtml(g.item.name)}</td>
+          <td class="num">${fmt(sumField(g.areaRows,'opening'))} ${escapeHtml(unit||'')}</td>
+          <td class="num">${cell(sumField(g.areaRows,'received'), unit, mergeBy(g.areaRows,'receivedBySource'))}</td>
+          <td class="num">${cell(sumField(g.areaRows,'transferIn'), unit, mergeBy(g.areaRows,'transferInBySource'))}</td>
+          <td class="num">${fmt(sumField(g.areaRows,'used'))} ${escapeHtml(unit||'')}</td>
+          <td class="num">${cell(sumField(g.areaRows,'writeOff'), unit, mergeBy(g.areaRows,'writeOffByReason'))}</td>
+          <td class="num">${cell(sumField(g.areaRows,'transferOut'), unit, mergeBy(g.areaRows,'transferOutByDest'))}</td>
+          <td class="num">${fmt(sumField(g.areaRows,'closing'))} ${escapeHtml(unit||'')}</td>
+        </tr>`;
+        const areaRows = g.areaRows.length > 1 ? g.areaRows.map(r => `<tr style="color:var(--text-dim);font-size:11px;">
+          <td style="padding-left:22px;">${escapeHtml(r.areaCode)}</td>
+          <td class="num">${fmt(r.opening)} ${escapeHtml(unit||'')}</td>
+          <td class="num">${cell(r.received, unit, r.receivedBySource)}</td>
+          <td class="num">${cell(r.transferIn, unit, r.transferInBySource)}</td>
+          <td class="num">${fmt(r.used)} ${escapeHtml(unit||'')}</td>
+          <td class="num">${cell(r.writeOff, unit, r.writeOffByReason)}</td>
+          <td class="num">${cell(r.transferOut, unit, r.transferOutByDest)}</td>
+          <td class="num">${fmt(r.closing)} ${escapeHtml(unit||'')}</td>
+        </tr>`).join('') : '';
+        return totalRow + areaRows;
+      }).join('')}
     </tbody></table>`;
 
   setPrintHead(`${from||'earliest'} – ${to} ${reportState.rubArea ? ' · Area: '+areaCodeById()[reportState.rubArea] : ''}`);
@@ -1349,7 +1357,7 @@ async function renderMonthlyReport(body){
   });
 
   setPrintHead(`Area: ${areaCodeById()[areaId]||''} · Month: ${reportState.month}`);
-  const areaItems = items.filter(i => i.areaIds.has(areaId)).sort((a,b)=>a.name.localeCompare(b.name));
+  const areaItems = sortItems(items.filter(i => i.areaIds.has(areaId)));
   if(areaItems.length === 0){ body.innerHTML = filterRow + `<div class="empty">No items in this area.</div>`; }
   else{
     const header = `<tr><th style="position:sticky;left:0;background:var(--panel);">Item</th>${days.map(d=>`<th style="text-align:center;">${Number(d.slice(8,10))}</th>`).join('')}</tr>`;
