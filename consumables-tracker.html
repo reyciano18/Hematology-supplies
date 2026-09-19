@@ -450,6 +450,20 @@ document.getElementById('areaTabs').addEventListener('click', (e)=>{
   renderList();
 });
 
+// Items with a set sort_order come first, in that order; everything else
+// falls back to alphabetical. Used for the card list and the Daily grid —
+// the two views staff work through item-by-item — so the physical order
+// they check shelves in (set once via the Items panel) can be matched.
+function sortItems(arr){
+  return arr.slice().sort((a,b)=>{
+    const ao = a.sort_order, bo = b.sort_order;
+    if(ao != null && bo != null) return ao - bo || a.name.localeCompare(b.name);
+    if(ao != null) return -1;
+    if(bo != null) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 function statusOf(item, balance){
   const thr = item.reorder_threshold;
   if(thr == null) return 'ok';
@@ -479,7 +493,7 @@ function renderList(){
   const area = areas.find(a => a.code === activeAreaCode);
   if(!area){ list.innerHTML=''; empty.style.display='block'; return; }
 
-  const areaItems = items.filter(i => i.areaIds.has(area.id)).sort((a,b)=>a.name.localeCompare(b.name));
+  const areaItems = sortItems(items.filter(i => i.areaIds.has(area.id)));
   if(areaItems.length === 0){ list.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display='none';
 
@@ -808,9 +822,10 @@ function renderItemsPanel(){
   const p = document.getElementById('itemsPanel');
   const head = `<div class="panel-head"><span class="panel-title"><i class="ti ti-list-details" aria-hidden="true" style="margin-right:6px;"></i>Items</span><button class="panel-close" data-close>&times;</button></div>`;
   const areaHeaders = areas.map(a=>`<th>${escapeHtml(a.code)}</th>`).join('');
-  const sorted = items.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const sorted = sortItems(items);
   const rows = sorted.map(i => `
     <tr data-id="${i.id}">
+      <td><input type="number" step="1" data-f="sortorder" value="${i.sort_order!=null?i.sort_order:''}" placeholder="—" style="width:56px;" title="Sets the order items appear in on the daily cards and Daily grid. Leave blank for alphabetical."></td>
       <td><input type="text" data-f="name" value="${escapeHtml(i.name)}" style="min-width:160px;"></td>
       <td><input type="text" data-f="unit" value="${escapeHtml(i.unit_of_measure||'')}" style="width:70px;"></td>
       <td><select data-f="consumable"><option value="true" ${i.is_consumable?'selected':''}>Consumable</option><option value="false" ${!i.is_consumable?'selected':''}>Non-consumable</option></select></td>
@@ -836,7 +851,7 @@ function renderItemsPanel(){
       <div class="err-msg" id="newItemErr"></div>
       <button class="primary" id="btnCreateItem"><i class="ti ti-plus" aria-hidden="true"></i>Add item</button>
     </div>
-    <table><thead><tr><th>Name</th><th>Unit</th><th>Type</th><th>Reorder at</th><th>Default supplier</th>${areaHeaders}<th></th><th></th></tr></thead>
+    <table><thead><tr><th>Order</th><th>Name</th><th>Unit</th><th>Type</th><th>Reorder at</th><th>Default supplier</th>${areaHeaders}<th></th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 
   p.querySelector('[data-close]').addEventListener('click', ()=>{ p.style.display='none'; });
@@ -885,12 +900,14 @@ async function saveItemRow(row){
   const isConsumable = row.querySelector('[data-f="consumable"]').value === 'true';
   const thresholdRaw = row.querySelector('[data-f="threshold"]').value;
   const threshold = thresholdRaw === '' ? null : parseFloat(thresholdRaw);
+  const sortOrderRaw = row.querySelector('[data-f="sortorder"]').value;
+  const sortOrder = sortOrderRaw === '' ? null : parseInt(sortOrderRaw, 10);
   const supplierId = row.querySelector('[data-f="supplier"]').value || null;
   const checkedAreaIds = Array.from(row.querySelectorAll('[data-f="area"]:checked')).map(el => el.dataset.area);
   try{
     const { error } = await sb.from('items').update({
       name, unit_of_measure: unit || null, is_consumable: isConsumable,
-      reorder_threshold: threshold, default_supplier_id: supplierId,
+      reorder_threshold: threshold, default_supplier_id: supplierId, sort_order: sortOrder,
     }).eq('id', id);
     if(error) throw error;
 
@@ -1390,7 +1407,7 @@ function renderGridTable(){
     <button class="small primary" id="gridSaveAll"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save changed rows</button>
   </div>`;
 
-  const areaItems = items.filter(i => i.areaIds.has(area.id)).sort((a,b)=>a.name.localeCompare(b.name));
+  const areaItems = sortItems(items.filter(i => i.areaIds.has(area.id)));
   if(areaItems.length === 0){
     p.innerHTML = head + filterRow + `<div class="empty">No items in this area.</div>`;
     wireGridControls();
