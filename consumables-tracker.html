@@ -1403,7 +1403,7 @@ function renderGridTable(){
     const endBal = e ? e.balance : startBal;
     return `<tr data-item="${item.id}" data-startbal="${startBal}">
       <td class="item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</td>
-      <td class="gbal">${fmt(startBal)}</td>
+      <td><input type="number" step="0.01" class="gbal" data-f="startbal" value="${fmt(startBal)}" title="Edit to set a fixed opening balance as of this date"></td>
       <td><input type="number" step="0.01" min="0" data-f="in" value="${e && e.in_qty ? fmt(e.in_qty) : ''}"></td>
       <td><select data-f="source">${sourceOptionsHtml(area.code, e ? e.source_code : '')}</select></td>
       <td><input type="number" step="0.01" min="0" data-f="out" value="${e && e.out_qty ? fmt(e.out_qty) : ''}"></td>
@@ -1465,12 +1465,23 @@ async function saveGridRow(tr){
 
   const inQty = num(get('in')), outQty = num(get('out')), woQty = num(get('wo')), xferQty = num(get('xfer'));
   const source = get('source'), woReason = get('woreason'), xferTo = get('xferto');
+  const startBalInput = parseFloat(get('startbal') || '0');
+  const startBalOriginal = parseFloat(tr.dataset.startbal || '0');
 
   if(inQty > 0 && !source){ showToast('Choose a source for the In quantity.'); return; }
   if(woQty > 0 && !woReason){ showToast('Choose a W/O reason.'); return; }
   if(xferQty > 0 && !xferTo){ showToast('Choose a Xfer To area.'); return; }
 
   try{
+    // If Start Bal was hand-edited, set it as a fixed opening balance BEFORE
+    // saving the day's own fields, so the day's balance is computed on top
+    // of the new anchor rather than the stale one.
+    if(Math.abs(startBalInput - startBalOriginal) > 0.0001){
+      await callLedgerAction({
+        action: 'set_opening_balance', area_code: area.code, item_name: item.name,
+        entry_date: gridState.date, balance: startBalInput,
+      });
+    }
     await callLedgerAction({
       action: 'grid_set', area_code: area.code, item_name: item.name, entry_date: gridState.date,
       in_qty: inQty, source_code: source || undefined,
@@ -1482,11 +1493,13 @@ async function saveGridRow(tr){
     // the server may have recomputed later-date balances on this area (a cascading
     // edit) and, for a transfer, also updated the destination (and possibly an
     // old destination it un-linked from) — refresh everything that could have moved.
-    const fresh = await fetchLedgerRowsInRange_(gridState.date, null);
+    const fresh = await fetchLedgerRowsInRange_(dayBefore(gridState.date), null);
     mergeLedgerRows_(fresh.filter(r => r.item_id === item.id));
     tr.classList.remove('dirty');
+    const newStartBal = balanceAsOf(item.id, area.id, dayBefore(gridState.date));
     tr.querySelector('.grow-end').textContent = fmt(entryOnDate(item.id, area.id, gridState.date)?.balance ?? 0);
-    tr.querySelector('.gbal').textContent = fmt(balanceAsOf(item.id, area.id, dayBefore(gridState.date)));
+    tr.querySelector('[data-f="startbal"]').value = fmt(newStartBal);
+    tr.dataset.startbal = newStartBal;
     showToast(`Saved ${item.name}`);
     renderList();
     refreshOpenPanels();
