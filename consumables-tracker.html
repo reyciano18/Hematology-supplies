@@ -105,8 +105,9 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   .filter-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;}
   .filter-row label{font-size:11px;color:var(--text-dim);display:flex;flex-direction:column;gap:4px;}
+  .grid-scroll{max-height:65vh;overflow-y:auto;overflow-x:auto;border:1px solid var(--line-soft);border-radius:6px;}
   .grid-table{font-size:12px;}
-  .grid-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-faint);padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  .grid-table th{position:sticky;top:0;z-index:2;background:var(--panel2);text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-faint);padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
   .grid-table td{padding:3px 4px;border-bottom:1px solid var(--line-soft);}
   .grid-table input,.grid-table select{padding:5px 6px;font-size:12px;min-width:64px;}
   .grid-table input[type=number]{width:64px;}
@@ -1433,7 +1434,7 @@ function renderGridTable(){
     </tr>`;
   }).join('');
 
-  const table = `<div style="overflow-x:auto;"><table class="grid-table"><thead><tr>
+  const table = `<div class="grid-scroll"><table class="grid-table"><thead><tr>
     <th>Item</th><th>Start Bal</th><th>In</th><th>Source</th><th>Out</th><th>W/O</th><th>W/O Reason</th><th>Xfer</th><th>Xfer To</th><th>End Bal</th><th></th>
   </tr></thead><tbody>${rows}</tbody></table></div>`;
 
